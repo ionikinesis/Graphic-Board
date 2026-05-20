@@ -1,125 +1,114 @@
 import { useState, useCallback } from 'react'
 
-/**
- * useFileSystem
- * Wraps the File System Access API.
- * Returns collections (parent folders with subfolders) and helpers.
- */
 export function useFileSystem() {
   const [collections, setCollections] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  // Import a top-level folder as a collection.
-  // Each subfolder inside becomes a "folder" within the collection.
-  const importCollection = useCallback(async () => {
-    if (!window.showDirectoryPicker) {
-      setError('Your browser does not support the File System Access API. Please use Chrome or Edge.')
-      return
-    }
+  const loadFromRoot = useCallback(async (rootHandle) => {
+    if (!rootHandle) { setCollections([]); return }
+    setLoading(true)
+    setError(null)
     try {
-      setLoading(true)
-      setError(null)
+      const cols = []
+      for await (const [colName, colHandle] of rootHandle.entries()) {
+        if (colHandle.kind !== 'directory') continue
 
-      const dirHandle = await window.showDirectoryPicker({ mode: 'read' })
+        const collection = { id: crypto.randomUUID(), name: colName, handle: colHandle, folders: [] }
+        let topCount = 0, topThumb = null
 
-      const collection = {
-        id: crypto.randomUUID(),
-        name: dirHandle.name,
-        handle: dirHandle,
-        folders: [],
-        thumbnail: null,
-      }
+        // Single pass over collection entries
+        for await (const [entryName, entryHandle] of colHandle.entries()) {
+          if (entryHandle.kind === 'file' && isImageFile(entryName)) {
+            // Loose image directly in collection folder
+            topCount++
+            if (!topThumb) topThumb = entryHandle
+          } else if (entryHandle.kind === 'directory') {
+            // Level-2 folder: scan its contents
+            let imgCount = 0, imgThumb = null
+            const subfolders = []
 
-      // Scan for subfolders
-      for await (const [name, handle] of dirHandle.entries()) {
-        if (handle.kind === 'directory') {
-          const folder = {
-            id: crypto.randomUUID(),
-            name,
-            handle,
-            imageCount: 0,
-            thumbnail: null,
-          }
-          // Count images inside
-          let count = 0
-          let firstImageHandle = null
-          for await (const [fname, fhandle] of handle.entries()) {
-            if (fhandle.kind === 'file' && isImageFile(fname)) {
-              count++
-              if (!firstImageHandle) firstImageHandle = fhandle
+            for await (const [fn, fh] of entryHandle.entries()) {
+              if (fh.kind === 'file' && isImageFile(fn)) {
+                imgCount++
+                if (!imgThumb) imgThumb = fh
+              } else if (fh.kind === 'directory') {
+                // Level-3 subfolder: count its images
+                let sfCount = 0, sfThumb = null
+                for await (const [fn2, fh2] of fh.entries()) {
+                  if (fh2.kind === 'file' && isImageFile(fn2)) {
+                    sfCount++
+                    if (!sfThumb) sfThumb = fh2
+                  }
+                }
+                subfolders.push({
+                  id: crypto.randomUUID(),
+                  name: fn,
+                  handle: fh,
+                  imageCount: sfCount,
+                  thumbnailHandle: sfThumb,
+                })
+              }
             }
+
+            subfolders.sort((a, b) => a.name.localeCompare(b.name))
+            collection.folders.push({
+              id: crypto.randomUUID(),
+              name: entryName,
+              handle: entryHandle,
+              imageCount: imgCount,
+              thumbnailHandle: imgThumb,
+              subfolders,
+            })
           }
-          folder.imageCount = count
-          folder.thumbnailHandle = firstImageHandle
-          collection.folders.push(folder)
         }
-      }
 
-      // Also count loose images at the top level of the collection
-      let topLevelCount = 0
-      let topLevelThumb = null
-      for await (const [name, handle] of dirHandle.entries()) {
-        if (handle.kind === 'file' && isImageFile(name)) {
-          topLevelCount++
-          if (!topLevelThumb) topLevelThumb = handle
+        if (topCount > 0) {
+          collection.folders.unshift({
+            id: crypto.randomUUID(),
+            name: '— top level —',
+            handle: colHandle,
+            imageCount: topCount,
+            thumbnailHandle: topThumb,
+            isTopLevel: true,
+            subfolders: [],
+          })
         }
-      }
 
-      // If there are top-level images, create a default folder for them
-      if (topLevelCount > 0) {
-        collection.folders.unshift({
-          id: crypto.randomUUID(),
-          name: '— top level —',
-          handle: dirHandle,
-          imageCount: topLevelCount,
-          thumbnailHandle: topLevelThumb,
-          isTopLevel: true,
+        collection.folders.sort((a, b) => {
+          if (a.isTopLevel) return -1
+          if (b.isTopLevel) return 1
+          return a.name.localeCompare(b.name)
         })
-      }
 
-      setCollections(prev => [...prev, collection])
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        setError('Could not open folder: ' + err.message)
+        cols.push(collection)
       }
+      cols.sort((a, b) => a.name.localeCompare(b.name))
+      setCollections(cols)
+    } catch (err) {
+      setError('Could not read library: ' + err.message)
     } finally {
       setLoading(false)
     }
   }, [])
 
-  // Load all image file handles from a folder handle
-  const loadImages = useCallback(async (folderHandle, isTopLevel = false) => {
+  const loadImages = useCallback(async (folderHandle) => {
     const images = []
     for await (const [name, handle] of folderHandle.entries()) {
       if (handle.kind === 'file' && isImageFile(name)) {
         images.push({ id: crypto.randomUUID(), name, handle })
       }
     }
-    // Sort by name
     images.sort((a, b) => a.name.localeCompare(b.name))
     return images
   }, [])
 
-  // Get a blob URL for a file handle (call URL.revokeObjectURL when done)
   const getImageUrl = useCallback(async (fileHandle) => {
     const file = await fileHandle.getFile()
     return URL.createObjectURL(file)
   }, [])
 
-  const removeCollection = useCallback((collectionId) => {
-    setCollections(prev => prev.filter(c => c.id !== collectionId))
-  }, [])
-
-  return {
-    collections,
-    loading,
-    error,
-    importCollection,
-    loadImages,
-    getImageUrl,
-    removeCollection,
-  }
+  return { collections, loading, error, loadFromRoot, loadImages, getImageUrl }
 }
 
 function isImageFile(name) {

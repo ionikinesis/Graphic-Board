@@ -4,7 +4,7 @@ export default function EmptyState({ onImport }) {
   return (
     <div style={styles.wrap}>
       <div style={styles.inner}>
-        <div style={styles.logo}>ref<span style={styles.accent}>board</span></div>
+        <img src="/images/logo.png" alt="refboard" style={styles.logo} />
         <p style={styles.sub}>a reference image manager for digital artists</p>
         <div style={styles.divider} />
         <p style={styles.body}>
@@ -37,13 +37,10 @@ const styles = {
     textAlign: 'center',
   },
   logo: {
-    fontFamily: 'var(--font-serif)',
-    fontSize: 28,
-    fontWeight: 400,
-    color: 'var(--text-primary)',
-    letterSpacing: '0.02em',
+    height: 52,
+    display: 'block',
+    userSelect: 'none',
   },
-  accent: { color: 'var(--accent)' },
   sub: {
     fontSize: 11,
     color: 'var(--text-muted)',
