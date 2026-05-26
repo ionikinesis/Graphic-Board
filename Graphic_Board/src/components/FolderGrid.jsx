@@ -6,9 +6,10 @@ import { FOLDER_YELLOW, darkenHex, getContrastColor } from '../utils/color.js'
 const IMAGE_RE = /\.(jpe?g|png|gif|webp|avif|bmp|tiff?|svg)$/i
 const MIN_W = { small: 110, medium: 160, large: 230 }
 
-function sortFolders(folders, sortBy, getFolderColor, getFolderRecent, isFolderFav, parentPath) {
+function sortFolders(folders, sortBy, getFolderColor, getFolderRecent, isFolderFav, parentPath, getFolderOrder, getSortName) {
   const arr = [...folders]
-  const key = f => `${parentPath}/${f.name}`
+  const key     = f => `${parentPath}/${f.name}`
+  const sortKey = f => (getSortName ? getSortName(key(f)) : null) || f.name
   switch (sortBy) {
     case 'recent':
       return arr.sort((a, b) => {
@@ -32,8 +33,19 @@ function sortFolders(folders, sortBy, getFolderColor, getFolderRecent, isFolderF
         const sb = b.subfolderCount || b.imageCount
         return sa !== sb ? sb - sa : a.name.localeCompare(b.name)
       })
+    case 'custom': {
+      const order = getFolderOrder ? getFolderOrder(parentPath) : []
+      const orderMap = {}
+      ;(order || []).forEach((name, i) => { orderMap[name] = i })
+      return arr.sort((a, b) => {
+        const ia = orderMap[a.name] ?? Number.MAX_SAFE_INTEGER
+        const ib = orderMap[b.name] ?? Number.MAX_SAFE_INTEGER
+        if (ia !== ib) return ia - ib
+        return a.name.localeCompare(b.name)
+      })
+    }
     default: // alpha
-      return arr.sort((a, b) => a.name.localeCompare(b.name))
+      return arr.sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
   }
 }
 
@@ -68,16 +80,36 @@ export default function FolderGrid({
   folders, onSelectFolder, getImageUrl,
   folderMeta, parentPath,
   sortBy = 'alpha', iconSize = 'medium', groupBy = 'none',
+  onRenameComplete,
 }) {
+  const [dragSrc,  setDragSrc]  = useState(null)
+  const [dragOver, setDragOver] = useState(null) // { index, side: 'before'|'after' }
+
   if (!folders || folders.length === 0) return null
 
   const sorted = sortFolders(
     folders, sortBy,
     folderMeta.getFolderColor, folderMeta.getFolderRecent,
-    folderMeta.isFolderFav, parentPath,
+    folderMeta.isFolderFav, parentPath, folderMeta.getFolderOrder,
+    folderMeta.getSortName,
   )
-  const minW = MIN_W[iconSize] || 160
-  const groups = groupFolders(sorted, groupBy, folderMeta, parentPath)
+  const minW    = MIN_W[iconSize] || 160
+  const canDrag = sortBy === 'custom' && groupBy === 'none'
+  const groups  = groupFolders(sorted, groupBy, folderMeta, parentPath)
+
+  function handleDrop(srcIdx, overIdx, side) {
+    if (srcIdx === null || overIdx === null || srcIdx === overIdx) {
+      setDragSrc(null); setDragOver(null); return
+    }
+    const names = sorted.map(f => f.name)
+    const [moved] = names.splice(srcIdx, 1)
+    const adjTarget = srcIdx < overIdx ? overIdx - 1 : overIdx
+    const insertAt  = side === 'after' ? adjTarget + 1 : adjTarget
+    names.splice(Math.max(0, Math.min(insertAt, names.length)), 0, moved)
+    folderMeta.setFolderOrder(parentPath, names)
+    setDragSrc(null)
+    setDragOver(null)
+  }
 
   return (
     <div>
@@ -92,7 +124,7 @@ export default function FolderGrid({
             </div>
           )}
           <div style={{ ...styles.grid, gridTemplateColumns: `repeat(auto-fill, minmax(${minW}px, 1fr))` }}>
-            {group.folders.map(folder => (
+            {group.folders.map((folder, fi) => (
               <FolderCard
                 key={folder.id}
                 folder={folder}
@@ -100,6 +132,20 @@ export default function FolderGrid({
                 onSelect={() => onSelectFolder(folder)}
                 getImageUrl={getImageUrl}
                 folderMeta={folderMeta}
+                onRenameComplete={onRenameComplete}
+                canDrag={canDrag}
+                isDragging={canDrag && dragSrc === fi}
+                isDragOver={canDrag && dragOver?.index === fi ? dragOver.side : null}
+                onDragStart={e => { setDragSrc(fi); e.dataTransfer.effectAllowed = 'move' }}
+                onDragOver={e => {
+                  e.preventDefault()
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  const side = e.clientX < rect.left + rect.width / 2 ? 'before' : 'after'
+                  if (dragOver?.index !== fi || dragOver?.side !== side) setDragOver({ index: fi, side })
+                }}
+                onDragLeave={() => setDragOver(null)}
+                onDrop={e => { e.preventDefault(); handleDrop(dragSrc, fi, dragOver?.side ?? 'before') }}
+                onDragEnd={() => { setDragSrc(null); setDragOver(null) }}
               />
             ))}
           </div>
@@ -109,7 +155,12 @@ export default function FolderGrid({
   )
 }
 
-function FolderCard({ folder, pathKey, onSelect, getImageUrl, folderMeta }) {
+function FolderCard({
+  folder, pathKey, onSelect, getImageUrl, folderMeta,
+  canDrag, isDragging, isDragOver,
+  onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
+  onRenameComplete,
+}) {
   const [thumbUrl,     setThumbUrl]     = useState(null)
   const [thumbVersion, setThumbVersion] = useState(0)
   const [hovered,      setHovered]      = useState(false)
@@ -198,10 +249,18 @@ function FolderCard({ folder, pathKey, onSelect, getImageUrl, folderMeta }) {
     setThumbVersion(v => v + 1)
   }
 
+  async function handleRename(newName) {
+    await folder.handle.move(newName)
+    if (onRenameComplete) onRenameComplete()
+  }
+
   const itemTags = folderMeta.getItemTags(pathKey)
   const allTags  = folderMeta.getAllTags()
+  const sortName = folderMeta.getSortName ? folderMeta.getSortName(pathKey) : null
 
   const contextItems = [
+    { sortNameRow: true, name: folder.name, sortName, onSet: name => folderMeta.setSortName(pathKey, name) },
+    { separator: true },
     {
       label: isFav ? 'remove from favorites' : 'add to favorites',
       icon: isFav ? '★' : '☆',
@@ -211,6 +270,8 @@ function FolderCard({ folder, pathKey, onSelect, getImageUrl, folderMeta }) {
     { colorRow: true, value: color, onChange: hex => folderMeta.setFolderColor(pathKey, hex) },
     { separator: true },
     { tagRow: true, tags: itemTags, onChange: ts => folderMeta.setItemTags(pathKey, ts), allTags, getTagColor: folderMeta.getTagColor },
+    { separator: true },
+    { linkRow: true, link: folderMeta.getItemLink(pathKey), onChange: link => folderMeta.setItemLink(pathKey, link) },
     { separator: true },
     {
       label: 'change thumbnail',
@@ -223,6 +284,8 @@ function FolderCard({ folder, pathKey, onSelect, getImageUrl, folderMeta }) {
       onClick: handleResetThumbnail,
       disabled: !folder.thumbnailHandle,
     },
+    { separator: true },
+    { renameRow: true, name: folder.name, onRename: handleRename },
     { separator: true },
     {
       label: 'copy path to clipboard',
@@ -251,16 +314,27 @@ function FolderCard({ folder, pathKey, onSelect, getImageUrl, folderMeta }) {
     <>
       <div
         ref={cardRef}
+        draggable={canDrag}
         style={{
           ...styles.card,
           borderColor: color || (hovered ? 'var(--border-strong)' : 'var(--border-subtle)'),
           borderWidth: color ? 1.5 : 0.5,
-          transform: hovered ? 'scale(1.02)' : 'scale(1)',
+          transform: hovered && !isDragging ? 'scale(1.02)' : 'scale(1)',
+          opacity: isDragging ? 0.35 : 1,
+          cursor: canDrag ? (isDragging ? 'grabbing' : 'grab') : 'pointer',
+          boxShadow: isDragOver === 'before' ? '-3px 0 0 0 var(--accent)' :
+                     isDragOver === 'after'  ? '3px 0 0 0 var(--accent)'  : undefined,
+          transition: 'border-color 0.12s, transform 0.12s, box-shadow 0.07s, opacity 0.1s',
         }}
         onClick={onSelect}
-        onMouseEnter={() => { setHovered(true); startPreview() }}
+        onMouseEnter={() => { setHovered(true); if (!canDrag) startPreview() }}
         onMouseLeave={() => { setHovered(false); stopPreview() }}
         onContextMenu={e => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY }) }}
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        onDragEnd={onDragEnd}
       >
         <div style={styles.thumb}>
           {thumbUrl ? (

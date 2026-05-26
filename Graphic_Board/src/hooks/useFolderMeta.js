@@ -1,22 +1,30 @@
-import { useState, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { dbGet, dbSet, dbDelete } from '../utils/db.js'
 
-const COLORS_KEY   = 'refboard_folder_colors'
-const RECENT_KEY   = 'refboard_recent'
-const FAVS_KEY     = 'refboard_folder_favs'
-const TAGS_KEY     = 'refboard_item_tags'
-const TAG_COLS_KEY = 'refboard_tag_colors'
+export function useFolderMeta(config, updateConfig) {
+  const [colors,    setColors]    = useState({})
+  const [recent,    setRecent]    = useState({})
+  const [favs,      setFavs]      = useState(() => new Set())
+  const [tags,      setTags]      = useState({})
+  const [tagColors, setTagColors] = useState({})
+  const [links,     setLinks]     = useState({})
+  const [folderOrd,  setFolderOrd]  = useState({})
+  const [imageOrd,   setImageOrd]   = useState({})
+  const [sortNames,  setSortNames]  = useState({})
 
-function loadLS(key, fallback) {
-  try { return JSON.parse(localStorage.getItem(key)) ?? fallback } catch { return fallback }
-}
-
-export function useFolderMeta() {
-  const [colors,    setColors]    = useState(() => loadLS(COLORS_KEY, {}))
-  const [recent,    setRecent]    = useState(() => loadLS(RECENT_KEY, {}))
-  const [favs,      setFavs]      = useState(() => new Set(loadLS(FAVS_KEY, [])))
-  const [tags,      setTags]      = useState(() => loadLS(TAGS_KEY, {}))
-  const [tagColors, setTagColors] = useState(() => loadLS(TAG_COLS_KEY, {}))
+  // Hydrate all state from config once loaded
+  useEffect(() => {
+    if (!config) return
+    setColors(config.folderColors ?? {})
+    setRecent(config.recent       ?? {})
+    setFavs(new Set(config.folderFavs ?? []))
+    setTags(config.itemTags       ?? {})
+    setTagColors(config.tagColors ?? {})
+    setLinks(config.itemLinks     ?? {})
+    setFolderOrd(config.folderOrder   ?? {})
+    setImageOrd(config.imageOrder     ?? {})
+    setSortNames(config.sortNames     ?? {})
+  }, [config])
 
   // ── folder color ─────────────────────────────────────────────────────────
   const setFolderColor = useCallback((pathKey, hex) => {
@@ -24,10 +32,10 @@ export function useFolderMeta() {
       const next = { ...prev }
       if (hex) next[pathKey] = hex
       else delete next[pathKey]
-      localStorage.setItem(COLORS_KEY, JSON.stringify(next))
+      updateConfig({ folderColors: next })
       return next
     })
-  }, [])
+  }, [updateConfig])
 
   const getFolderColor = useCallback((pathKey) => colors[pathKey] ?? null, [colors])
 
@@ -35,10 +43,10 @@ export function useFolderMeta() {
   const touchFolder = useCallback((pathKey) => {
     setRecent(prev => {
       const next = { ...prev, [pathKey]: Date.now() }
-      localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+      updateConfig({ recent: next })
       return next
     })
-  }, [])
+  }, [updateConfig])
 
   const getFolderRecent = useCallback((pathKey) => recent[pathKey] ?? 0, [recent])
 
@@ -48,14 +56,14 @@ export function useFolderMeta() {
       const next = new Set(prev)
       if (next.has(pathKey)) next.delete(pathKey)
       else next.add(pathKey)
-      localStorage.setItem(FAVS_KEY, JSON.stringify([...next]))
+      updateConfig({ folderFavs: [...next] })
       return next
     })
-  }, [])
+  }, [updateConfig])
 
   const isFolderFav = useCallback((pathKey) => favs.has(pathKey), [favs])
 
-  // ── custom thumbnails (IDB) ───────────────────────────────────────────────
+  // ── custom thumbnails (IDB — stays out of JSON) ───────────────────────────
   const setCustomThumb = useCallback(async (pathKey, fileHandle) => {
     if (fileHandle) await dbSet('custom_thumbs', pathKey, fileHandle)
     else await dbDelete('custom_thumbs', pathKey)
@@ -71,10 +79,10 @@ export function useFolderMeta() {
       const next = { ...prev }
       if (tagList && tagList.length > 0) next[pathKey] = tagList
       else delete next[pathKey]
-      localStorage.setItem(TAGS_KEY, JSON.stringify(next))
+      updateConfig({ itemTags: next })
       return next
     })
-  }, [])
+  }, [updateConfig])
 
   const getItemTags = useCallback((pathKey) => tags[pathKey] ?? [], [tags])
 
@@ -99,23 +107,69 @@ export function useFolderMeta() {
       const next = { ...prev }
       if (hex) next[tagName] = hex
       else delete next[tagName]
-      localStorage.setItem(TAG_COLS_KEY, JSON.stringify(next))
+      updateConfig({ tagColors: next })
       return next
     })
-  }, [])
+  }, [updateConfig])
 
   const getTagColor = useCallback((tagName) => tagColors[tagName] ?? null, [tagColors])
 
-  // registers a tag with an optional color without assigning it to any item
   const createTag = useCallback((name, color) => {
     const trimmed = name.trim().toLowerCase()
     if (!trimmed || !color) return
     setTagColors(prev => {
       const next = { ...prev, [trimmed]: color }
-      localStorage.setItem(TAG_COLS_KEY, JSON.stringify(next))
+      updateConfig({ tagColors: next })
       return next
     })
-  }, [])
+  }, [updateConfig])
+
+  // ── item links ────────────────────────────────────────────────────────────
+  const setItemLink = useCallback((pathKey, linkData) => {
+    setLinks(prev => {
+      const next = { ...prev }
+      if (linkData) next[pathKey] = linkData
+      else delete next[pathKey]
+      updateConfig({ itemLinks: next })
+      return next
+    })
+  }, [updateConfig])
+
+  const getItemLink = useCallback((pathKey) => links[pathKey] ?? null, [links])
+
+  // ── custom sort order ─────────────────────────────────────────────────────
+  const setFolderOrder = useCallback((parentPath, names) => {
+    setFolderOrd(prev => {
+      const next = { ...prev, [parentPath]: names }
+      updateConfig({ folderOrder: next })
+      return next
+    })
+  }, [updateConfig])
+
+  const getFolderOrder = useCallback((parentPath) => folderOrd[parentPath] ?? [], [folderOrd])
+
+  const setImageOrder = useCallback((folderPath, names) => {
+    setImageOrd(prev => {
+      const next = { ...prev, [folderPath]: names }
+      updateConfig({ imageOrder: next })
+      return next
+    })
+  }, [updateConfig])
+
+  const getImageOrder = useCallback((folderPath) => imageOrd[folderPath] ?? [], [imageOrd])
+
+  // ── sort name alias ───────────────────────────────────────────────────────
+  const getSortName = useCallback((pathKey) => sortNames[pathKey] ?? null, [sortNames])
+
+  const setSortName = useCallback((pathKey, name) => {
+    setSortNames(prev => {
+      const next = { ...prev }
+      if (name) next[pathKey] = name
+      else delete next[pathKey]
+      updateConfig({ sortNames: next })
+      return next
+    })
+  }, [updateConfig])
 
   // ── tag operations ────────────────────────────────────────────────────────
   const renameTag = useCallback((oldName, newName) => {
@@ -126,7 +180,7 @@ export function useFolderMeta() {
       Object.entries(prev).forEach(([pk, list]) => {
         next[pk] = [...new Set(list.map(t => t === oldName ? trimmed : t))]
       })
-      localStorage.setItem(TAGS_KEY, JSON.stringify(next))
+      updateConfig({ itemTags: next })
       return next
     })
     setTagColors(prev => {
@@ -134,10 +188,10 @@ export function useFolderMeta() {
       const next = { ...prev }
       next[trimmed] = next[oldName]
       delete next[oldName]
-      localStorage.setItem(TAG_COLS_KEY, JSON.stringify(next))
+      updateConfig({ tagColors: next })
       return next
     })
-  }, [])
+  }, [updateConfig])
 
   const mergeTag = useCallback((fromName, intoName) => {
     setTags(prev => {
@@ -145,16 +199,16 @@ export function useFolderMeta() {
       Object.entries(prev).forEach(([pk, list]) => {
         next[pk] = [...new Set(list.map(t => t === fromName ? intoName : t))]
       })
-      localStorage.setItem(TAGS_KEY, JSON.stringify(next))
+      updateConfig({ itemTags: next })
       return next
     })
     setTagColors(prev => {
       const next = { ...prev }
       delete next[fromName]
-      localStorage.setItem(TAG_COLS_KEY, JSON.stringify(next))
+      updateConfig({ tagColors: next })
       return next
     })
-  }, [])
+  }, [updateConfig])
 
   const deleteTag = useCallback((tagName) => {
     setTags(prev => {
@@ -163,16 +217,16 @@ export function useFolderMeta() {
         const updated = list.filter(t => t !== tagName)
         if (updated.length > 0) next[pk] = updated
       })
-      localStorage.setItem(TAGS_KEY, JSON.stringify(next))
+      updateConfig({ itemTags: next })
       return next
     })
     setTagColors(prev => {
       const next = { ...prev }
       delete next[tagName]
-      localStorage.setItem(TAG_COLS_KEY, JSON.stringify(next))
+      updateConfig({ tagColors: next })
       return next
     })
-  }, [])
+  }, [updateConfig])
 
   return {
     getFolderColor, setFolderColor,
@@ -182,5 +236,9 @@ export function useFolderMeta() {
     setItemTags, getItemTags, getAllTags, getTagStats,
     setTagColor, getTagColor, createTag,
     renameTag, mergeTag, deleteTag,
+    setItemLink, getItemLink,
+    setFolderOrder, getFolderOrder,
+    setImageOrder, getImageOrder,
+    getSortName, setSortName,
   }
 }

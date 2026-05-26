@@ -20,7 +20,15 @@ export default function ContextMenu({ x, y, items, onClose }) {
   }, [onClose])
 
   const menuW = 210
-  const estH  = items.reduce((h, it) => h + (it.separator ? 9 : it.colorRow ? 36 : it.tagRow ? 60 : 30), 8)
+  const estH  = items.reduce((h, it) => h + (
+    it.separator   ? 9  :
+    it.colorRow    ? 36 :
+    it.tagRow      ? 60 :
+    it.linkRow     ? 90 :
+    it.sortNameRow ? 52 :
+    it.renameRow   ? 30 :
+    30
+  ), 8)
   const left  = Math.min(x, window.innerWidth  - menuW - 8)
   const top   = Math.min(y, window.innerHeight - estH  - 8)
 
@@ -32,8 +40,11 @@ export default function ContextMenu({ x, y, items, onClose }) {
     >
       {items.map((item, i) => {
         if (item.separator) return <div key={i} style={s.sep} />
-        if (item.colorRow)  return <ColorRow key={i} value={item.value} onChange={item.onChange} onClose={onClose} />
-        if (item.tagRow)    return <TagRow key={i} tags={item.tags} onChange={item.onChange} allTags={item.allTags} getTagColor={item.getTagColor} />
+        if (item.colorRow)    return <ColorRow key={i} value={item.value} onChange={item.onChange} onClose={onClose} />
+        if (item.tagRow)      return <TagRow key={i} tags={item.tags} onChange={item.onChange} allTags={item.allTags} getTagColor={item.getTagColor} />
+        if (item.linkRow)     return <LinkRow key={i} link={item.link} onChange={item.onChange} onClose={onClose} />
+        if (item.sortNameRow) return <SortNameRow key={i} name={item.name} sortName={item.sortName} onSet={item.onSet} onClose={onClose} />
+        if (item.renameRow)   return <RenameRow key={i} name={item.name} onRename={item.onRename} onClose={onClose} />
         return (
           <MenuItem key={i} item={item} onClose={onClose} />
         )
@@ -205,6 +216,203 @@ function TagRow({ tags, onChange, allTags, getTagColor }) {
   )
 }
 
+function normalizeUrl(raw) {
+  const t = raw.trim()
+  if (!t) return t
+  return /^https?:\/\//i.test(t) ? t : 'https://' + t
+}
+
+function getDomain(url) {
+  try { return new URL(normalizeUrl(url)).hostname } catch { return '' }
+}
+
+function LinkRow({ link, onChange, onClose }) {
+  const [editing,    setEditing]    = useState(false)
+  const [urlDraft,   setUrlDraft]   = useState(link?.url   || '')
+  const [titleDraft, setTitleDraft] = useState(link?.title || '')
+
+  function save() {
+    const url = normalizeUrl(urlDraft)
+    if (!url) return
+    const title = titleDraft.trim() || getDomain(url) || url
+    onChange({ url, title })
+    setEditing(false)
+    onClose()
+  }
+
+  function remove() {
+    onChange(null)
+    setEditing(false)
+    onClose()
+  }
+
+  function openLink() {
+    window.open(normalizeUrl(link.url), '_blank', 'noopener,noreferrer')
+    onClose()
+  }
+
+  function startEdit() {
+    setUrlDraft(link?.url || '')
+    setTitleDraft(link?.title || '')
+    setEditing(true)
+  }
+
+  if (editing) {
+    return (
+      <div style={s.linkSection} onMouseDown={e => e.stopPropagation()}>
+        <div style={s.linkHeader}>
+          <span style={s.linkLabel}>link</span>
+          {link && <button style={s.colorClear} onClick={remove}>remove</button>}
+        </div>
+        <input
+          type="text"
+          value={urlDraft}
+          placeholder="https://..."
+          style={s.linkInput}
+          autoFocus
+          spellCheck={false}
+          onChange={e => setUrlDraft(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') save()
+            if (e.key === 'Escape') { setEditing(false); if (!link) onClose() }
+          }}
+        />
+        <input
+          type="text"
+          value={titleDraft}
+          placeholder={getDomain(urlDraft) || 'site title (optional)'}
+          style={{ ...s.linkInput, marginTop: 4 }}
+          spellCheck={false}
+          onChange={e => setTitleDraft(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') save()
+            if (e.key === 'Escape') { setEditing(false); if (!link) onClose() }
+          }}
+        />
+        <div style={s.linkActions}>
+          <button style={s.linkSave} onClick={save}>save</button>
+          <button style={s.linkCancel} onClick={() => { setEditing(false); if (!link) onClose() }}>cancel</button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!link) {
+    return (
+      <button style={s.item} onClick={startEdit}>
+        <span style={s.icon}>🔗</span>
+        <span style={{ flex: 1 }}>add link</span>
+      </button>
+    )
+  }
+
+  const domain    = getDomain(link.url)
+  const faviconSrc = domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=16` : null
+
+  return (
+    <div style={s.linkExistingRow} onMouseDown={e => e.stopPropagation()}>
+      <button style={s.linkOpenBtn} onClick={openLink} title={link.url}>
+        {faviconSrc && (
+          <img
+            src={faviconSrc}
+            alt=""
+            style={s.favicon}
+            onError={e => { e.target.style.display = 'none' }}
+          />
+        )}
+        <span style={s.linkTitle}>{link.title || domain || link.url}</span>
+        <span style={s.linkExternal}>↗</span>
+      </button>
+      <button style={s.linkEditBtn} onClick={startEdit} title="edit link">✎</button>
+    </div>
+  )
+}
+
+function SortNameRow({ name, sortName, onSet, onClose }) {
+  const [draft, setDraft] = useState(sortName || '')
+
+  function save() {
+    const v = draft.trim()
+    onSet(v || null)
+    onClose()
+  }
+
+  return (
+    <div style={s.linkSection} onMouseDown={e => e.stopPropagation()}>
+      <div style={s.linkHeader}>
+        <span style={s.linkLabel}>sort name</span>
+        {sortName && (
+          <button style={s.colorClear} onClick={() => { onSet(null); onClose() }}>clear</button>
+        )}
+      </div>
+      <input
+        type="text"
+        value={draft}
+        placeholder={name}
+        spellCheck={false}
+        style={s.linkInput}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') save()
+          if (e.key === 'Escape') onClose()
+        }}
+      />
+    </div>
+  )
+}
+
+function RenameRow({ name, onRename, onClose }) {
+  const [editing, setEditing] = useState(false)
+  const [draft,   setDraft]   = useState(name)
+  const [error,   setError]   = useState(null)
+
+  async function save() {
+    const newName = draft.trim()
+    if (!newName || newName === name) { setEditing(false); return }
+    try {
+      await onRename(newName)
+      onClose()
+    } catch {
+      setError('rename failed')
+      setTimeout(() => setError(null), 1500)
+    }
+  }
+
+  if (!editing) {
+    return (
+      <button style={s.item} onClick={() => { setDraft(name); setEditing(true) }}>
+        <span style={s.icon}>✎</span>
+        <span style={{ flex: 1 }}>rename</span>
+      </button>
+    )
+  }
+
+  return (
+    <div style={s.linkSection} onMouseDown={e => e.stopPropagation()}>
+      <div style={s.linkHeader}>
+        <span style={{ ...s.linkLabel, color: error ? '#e05050' : undefined }}>{error || 'rename'}</span>
+      </div>
+      <input
+        type="text"
+        value={draft}
+        autoFocus
+        spellCheck={false}
+        style={s.linkInput}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') save()
+          if (e.key === 'Escape') setEditing(false)
+        }}
+        onFocus={e => e.target.select()}
+      />
+      <div style={s.linkActions}>
+        <button style={s.linkSave} onClick={save}>save</button>
+        <button style={s.linkCancel} onClick={() => setEditing(false)}>cancel</button>
+      </div>
+    </div>
+  )
+}
+
 const s = {
   menu: {
     position: 'fixed',
@@ -318,5 +526,55 @@ const s = {
     background: 'var(--bg-base)', border: '0.5px solid var(--border-subtle)',
     borderRadius: 3, padding: '2px 6px', cursor: 'pointer',
     fontFamily: 'var(--font-mono)', letterSpacing: '0.04em',
+  },
+  linkSection: { padding: '6px 12px 8px' },
+  linkHeader:  { display: 'flex', alignItems: 'center', marginBottom: 6 },
+  linkLabel: {
+    fontSize: 10, color: 'var(--text-muted)',
+    letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, flex: 1,
+  },
+  linkInput: {
+    width: '100%', boxSizing: 'border-box',
+    fontSize: 11, color: 'var(--text-secondary)',
+    background: 'var(--bg-raised)', border: '0.5px solid var(--border-mid)',
+    borderRadius: 3, padding: '4px 7px',
+    fontFamily: 'var(--font-mono)', outline: 'none', letterSpacing: '0.04em',
+  },
+  linkActions: { display: 'flex', gap: 4, marginTop: 6 },
+  linkSave: {
+    flex: 1, fontSize: 11, color: 'var(--accent)',
+    background: 'var(--accent-faint)', border: '0.5px solid var(--accent-dim)',
+    borderRadius: 3, padding: '4px 8px', cursor: 'pointer',
+    letterSpacing: '0.04em', fontFamily: 'var(--font-mono)',
+  },
+  linkCancel: {
+    flex: 1, fontSize: 11, color: 'var(--text-muted)',
+    background: 'transparent', border: '0.5px solid var(--border-mid)',
+    borderRadius: 3, padding: '4px 8px', cursor: 'pointer',
+    letterSpacing: '0.04em', fontFamily: 'var(--font-mono)',
+  },
+  linkExistingRow: {
+    display: 'flex', alignItems: 'center', gap: 4,
+    padding: '3px 8px',
+  },
+  linkOpenBtn: {
+    flex: 1, display: 'flex', alignItems: 'center', gap: 6,
+    padding: '5px 8px', overflow: 'hidden', textAlign: 'left',
+    background: 'var(--bg-raised)', border: '0.5px solid var(--border-mid)',
+    borderRadius: 4, cursor: 'pointer',
+  },
+  favicon: { width: 14, height: 14, flexShrink: 0 },
+  linkTitle: {
+    fontSize: 11, color: 'var(--text-secondary)',
+    fontFamily: 'var(--font-mono)', letterSpacing: '0.04em',
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+  },
+  linkExternal: { fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 },
+  linkEditBtn: {
+    width: 26, height: 26, flexShrink: 0,
+    background: 'var(--bg-raised)', border: '0.5px solid var(--border-mid)',
+    borderRadius: 4, cursor: 'pointer', fontSize: 13,
+    color: 'var(--text-muted)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
 }

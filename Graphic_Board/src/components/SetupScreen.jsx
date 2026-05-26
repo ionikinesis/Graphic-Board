@@ -64,6 +64,8 @@ const s = {
     height: 156,
     display: 'block',
     userSelect: 'none',
+    filter: 'var(--logo-filter)',
+    transition: 'filter 0.2s',
   },
   sub: {
     fontSize: 13,

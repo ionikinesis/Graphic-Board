@@ -3,8 +3,10 @@ import ContextMenu from './ContextMenu.jsx'
 
 const COL_W = { small: 100, medium: 140, large: 200 }
 
-function sortImages(images, sortBy, isFavourited, sizes) {
-  const arr = [...images]
+function sortImages(images, sortBy, isFavourited, sizes, folderMeta, parentPath) {
+  const arr     = [...images]
+  const getKey  = img => parentPath ? `${parentPath}/${img.name}` : img.name
+  const sortKey = img => (folderMeta?.getSortName ? folderMeta.getSortName(getKey(img)) : null) || img.name
   switch (sortBy) {
     case 'favfirst':
       return arr.sort((a, b) => {
@@ -17,8 +19,19 @@ function sortImages(images, sortBy, isFavourited, sizes) {
         const sb = sizes[b.id] ?? -1
         return sa !== sb ? sb - sa : a.name.localeCompare(b.name)
       })
+    case 'custom': {
+      const order = folderMeta ? folderMeta.getImageOrder(parentPath) : []
+      const orderMap = {}
+      ;(order || []).forEach((name, i) => { orderMap[name] = i })
+      return arr.sort((a, b) => {
+        const ia = orderMap[a.name] ?? Number.MAX_SAFE_INTEGER
+        const ib = orderMap[b.name] ?? Number.MAX_SAFE_INTEGER
+        if (ia !== ib) return ia - ib
+        return a.name.localeCompare(b.name)
+      })
+    }
     default: // alpha
-      return arr.sort((a, b) => a.name.localeCompare(b.name))
+      return arr.sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
   }
 }
 
@@ -28,10 +41,12 @@ export default function ImageGrid({
   iconSize = 'medium', hideWhenEmpty, sortBy = 'alpha',
   parentPath = '', folderMeta = null,
 }) {
-  const [loaded,  setLoaded]  = useState([])
-  const [loading, setLoading] = useState(true)
+  const [loaded,   setLoaded]   = useState([])
+  const [loading,  setLoading]  = useState(true)
   const [lightbox, setLightbox] = useState(null)
   const [sizes,    setSizes]    = useState({})
+  const [dragSrc,  setDragSrc]  = useState(null)
+  const [dragOver, setDragOver] = useState(null) // { index, side: 'before'|'after' }
 
   useEffect(() => {
     setLoaded([])
@@ -99,13 +114,34 @@ export default function ImageGrid({
     )
   }
 
-  const sorted  = sortImages(loaded, sortBy, isFavourited, sizes)
+  const sorted  = sortImages(loaded, sortBy, isFavourited, sizes, folderMeta, parentPath)
   const colSize = COL_W[iconSize] || 140
+  const canDrag = sortBy === 'custom'
+
+  function handleImageRename(oldName, newName) {
+    setLoaded(prev => prev.map(img =>
+      img.name === oldName ? { ...img, id: newName, name: newName } : img
+    ))
+  }
+
+  function handleDrop(srcIdx, overIdx, side) {
+    if (srcIdx === null || overIdx === null || srcIdx === overIdx) {
+      setDragSrc(null); setDragOver(null); return
+    }
+    const names = sorted.map(img => img.name)
+    const [moved] = names.splice(srcIdx, 1)
+    const adjTarget = srcIdx < overIdx ? overIdx - 1 : overIdx
+    const insertAt  = side === 'after' ? adjTarget + 1 : adjTarget
+    names.splice(Math.max(0, Math.min(insertAt, names.length)), 0, moved)
+    if (folderMeta) folderMeta.setImageOrder(parentPath, names)
+    setDragSrc(null)
+    setDragOver(null)
+  }
 
   return (
     <>
       <div style={{ ...styles.grid, gridTemplateColumns: `repeat(auto-fill, minmax(${colSize}px, 1fr))` }}>
-        {sorted.map(img => (
+        {sorted.map((img, fi) => (
           <ImageCard
             key={img.id}
             image={img}
@@ -115,6 +151,20 @@ export default function ImageGrid({
             onOpen={() => openLightbox(img)}
             pathKey={parentPath ? `${parentPath}/${img.name}` : img.name}
             folderMeta={folderMeta}
+            onRenameImage={handleImageRename}
+            canDrag={canDrag}
+            isDragging={canDrag && dragSrc === fi}
+            isDragOver={canDrag && dragOver?.index === fi ? dragOver.side : null}
+            onDragStart={e => { setDragSrc(fi); e.dataTransfer.effectAllowed = 'move' }}
+            onDragOver={e => {
+              e.preventDefault()
+              const rect = e.currentTarget.getBoundingClientRect()
+              const side = e.clientX < rect.left + rect.width / 2 ? 'before' : 'after'
+              if (dragOver?.index !== fi || dragOver?.side !== side) setDragOver({ index: fi, side })
+            }}
+            onDragLeave={() => setDragOver(null)}
+            onDrop={e => { e.preventDefault(); handleDrop(dragSrc, fi, dragOver?.side ?? 'before') }}
+            onDragEnd={() => { setDragSrc(null); setDragOver(null) }}
           />
         ))}
       </div>
@@ -177,7 +227,12 @@ function Lightbox({ image, url, getImageUrl, favourited, onToggleFavourite, onCl
   )
 }
 
-function ImageCard({ image, getImageUrl, favourited, onToggleFavourite, onOpen, pathKey, folderMeta }) {
+function ImageCard({
+  image, getImageUrl, favourited, onToggleFavourite, onOpen, pathKey, folderMeta,
+  canDrag, isDragging, isDragOver,
+  onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
+  onRenameImage,
+}) {
   const [url,         setUrl]         = useState(null)
   const [hovered,     setHovered]     = useState(false)
   const [contextMenu, setContextMenu] = useState(null)
@@ -190,8 +245,18 @@ function ImageCard({ image, getImageUrl, favourited, onToggleFavourite, onOpen, 
 
   const itemTags = folderMeta ? folderMeta.getItemTags(pathKey) : []
   const allTags  = folderMeta ? folderMeta.getAllTags() : []
+  const sortName = folderMeta?.getSortName ? folderMeta.getSortName(pathKey) : null
+
+  async function handleRename(newName) {
+    await image.handle.move(newName)
+    if (onRenameImage) onRenameImage(image.name, newName)
+  }
 
   const contextItems = [
+    ...(folderMeta ? [
+      { sortNameRow: true, name: image.name, sortName, onSet: name => folderMeta.setSortName(pathKey, name) },
+      { separator: true },
+    ] : []),
     {
       label: favourited ? 'remove from favorites' : 'add to favorites',
       icon:  favourited ? '★' : '☆',
@@ -201,7 +266,11 @@ function ImageCard({ image, getImageUrl, favourited, onToggleFavourite, onOpen, 
     ...(folderMeta ? [
       { tagRow: true, tags: itemTags, onChange: ts => folderMeta.setItemTags(pathKey, ts), allTags, getTagColor: folderMeta.getTagColor },
       { separator: true },
+      { linkRow: true, link: folderMeta.getItemLink(pathKey), onChange: link => folderMeta.setItemLink(pathKey, link) },
+      { separator: true },
     ] : []),
+    { renameRow: true, name: image.name, onRename: handleRename },
+    { separator: true },
     {
       label: 'copy filename',
       icon: '⎘',
@@ -213,15 +282,26 @@ function ImageCard({ image, getImageUrl, favourited, onToggleFavourite, onOpen, 
   return (
     <>
       <div
+        draggable={canDrag}
         style={{
           ...styles.card,
           borderColor: favourited ? 'rgba(200,169,126,0.35)' : hovered ? 'var(--border-strong)' : 'var(--border-subtle)',
-          transform: hovered ? 'scale(1.015)' : 'scale(1)',
+          transform: hovered && !isDragging ? 'scale(1.015)' : 'scale(1)',
+          opacity: isDragging ? 0.35 : 1,
+          cursor: canDrag ? (isDragging ? 'grabbing' : 'grab') : 'pointer',
+          boxShadow: isDragOver === 'before' ? '-3px 0 0 0 var(--accent)' :
+                     isDragOver === 'after'  ? '3px 0 0 0 var(--accent)'  : undefined,
+          transition: 'border-color 0.12s, transform 0.12s, box-shadow 0.07s, opacity 0.1s',
         }}
         onClick={onOpen}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onContextMenu={e => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY }) }}
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        onDragEnd={onDragEnd}
       >
         {url ? (
           <img src={url} alt={image.name} style={styles.img} />

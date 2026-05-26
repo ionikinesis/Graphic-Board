@@ -6,6 +6,7 @@ const SORT_OPTIONS = [
   { value: 'favfirst', label: 'favorites first' },
   { value: 'color',    label: 'by color'         },
   { value: 'size',     label: 'by size'          },
+  { value: 'custom',   label: 'custom order'     },
 ]
 
 const GROUP_OPTIONS = [

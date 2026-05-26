@@ -12,7 +12,7 @@ export function useRootDirectory() {
     dbGet(STORE, ROOT_KEY)
       .then(async h => {
         if (!h) { setStatus('none'); return }
-        const perm = await h.queryPermission({ mode: 'read' })
+        const perm = await h.queryPermission({ mode: 'readwrite' })
         setHandle(h)
         setStatus(perm === 'granted' ? 'ready' : 'needs-permission')
       })
@@ -22,7 +22,7 @@ export function useRootDirectory() {
   async function chooseRoot() {
     if (!window.showDirectoryPicker) return false
     try {
-      const h = await window.showDirectoryPicker({ mode: 'read' })
+      const h = await window.showDirectoryPicker({ mode: 'readwrite' })
       await dbSet(STORE, ROOT_KEY, h)
       setHandle(h)
       setStatus('ready')
@@ -35,7 +35,7 @@ export function useRootDirectory() {
 
   async function grantPermission() {
     if (!handle) return false
-    const perm = await handle.requestPermission({ mode: 'read' })
+    const perm = await handle.requestPermission({ mode: 'readwrite' })
     if (perm === 'granted') { setStatus('ready'); return true }
     return false
   }

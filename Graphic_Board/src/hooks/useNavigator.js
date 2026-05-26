@@ -38,9 +38,10 @@ export function useNavigator(rootHandle) {
   const [stack,        setStack]        = useState([])
   const [forwardStack, setForwardStack] = useState([])
   const [currentHandle, setCurrentHandle] = useState(null)
-  const [folders,    setFolders]    = useState([])
-  const [hasImages,  setHasImages]  = useState(false)
-  const [loading,    setLoading]    = useState(false)
+  const [folders,     setFolders]    = useState([])
+  const [hasImages,   setHasImages]  = useState(false)
+  const [loading,     setLoading]    = useState(false)
+  const [scanVersion, setScanVersion] = useState(0)
 
   useEffect(() => {
     if (!rootHandle) {
@@ -63,7 +64,7 @@ export function useNavigator(rootHandle) {
       })
       .catch(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [currentHandle])
+  }, [currentHandle, scanVersion])
 
   const navigateInto = useCallback((folder) => {
     setStack(prev => [...prev, { name: folder.name, handle: folder.handle }])
@@ -98,6 +99,8 @@ export function useNavigator(rootHandle) {
     })
   }, [])
 
+  const refreshCurrent = useCallback(() => setScanVersion(v => v + 1), [])
+
   const breadcrumb = (() => {
     const crumbs = []
     if (rootHandle) crumbs.push({ label: rootHandle.name, index: -1 })
@@ -126,6 +129,6 @@ export function useNavigator(rootHandle) {
     canGoBack:    stack.length > 0,
     canGoForward: forwardStack.length > 0,
     navigateInto, navigateToPath, goBack, goForward,
-    loadImages, getImageUrl,
+    loadImages, getImageUrl, refreshCurrent,
   }
 }

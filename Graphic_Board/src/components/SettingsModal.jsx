@@ -1,11 +1,11 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { themes } from '../utils/themes.js'
 import { PRESET_COLORS } from '../utils/color.js'
 
 const darkThemes  = Object.entries(themes).filter(([, t]) => t.mode === 'dark')
 const lightThemes = Object.entries(themes).filter(([, t]) => t.mode === 'light')
 
-export default function SettingsModal({ rootName, onChoose, onClear, onClose, scale, onSetScale, currentTheme, onSetTheme, tagManager }) {
+export default function SettingsModal({ rootName, onChoose, onClear, onClose, scale, onSetScale, currentTheme, onSetTheme, customColors, onSetCustomColors, tagManager }) {
   return (
     <div style={s.backdrop} onClick={onClose}>
       <div style={s.panel} onClick={e => e.stopPropagation()}>
@@ -46,6 +46,14 @@ export default function SettingsModal({ rootName, onChoose, onClear, onClose, sc
               ))}
             </div>
           </div>
+
+          {/* Custom theme */}
+          <CustomThemeSection
+            isActive={currentTheme === 'custom'}
+            onSelect={() => onSetTheme('custom')}
+            colors={customColors}
+            onChange={onSetCustomColors}
+          />
 
           <div style={s.rule} />
 
@@ -231,6 +239,78 @@ function TagRow({ tag, count, color, allTags, onSetColor, onRename, onMerge, onD
   )
 }
 
+// ── Custom theme ───────────────────────────────────────────────────────────
+
+function CustomThemeSection({ isActive, onSelect, colors, onChange }) {
+  return (
+    <div>
+      {/* Chip — rendered with the user's own colors as a live preview */}
+      <button
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+          padding: '7px 10px', background: colors.bg,
+          border: `1.5px solid ${isActive ? colors.accent : '#555'}`,
+          borderRadius: 4, cursor: 'pointer', textAlign: 'left', marginBottom: 4,
+        }}
+        onClick={onSelect}
+      >
+        <span style={{ width: 9, height: 9, borderRadius: '50%', background: colors.accent, flexShrink: 0, border: `0.5px solid rgba(255,255,255,0.2)` }} />
+        <span style={{ flex: 1, fontSize: 12, fontFamily: 'var(--font-mono)', color: colors.text, letterSpacing: '0.04em' }}>
+          custom
+        </span>
+        {isActive && <span style={{ fontSize: 11, color: colors.accent }}>✓</span>}
+      </button>
+
+      {/* Hex editors — only shown when custom is active */}
+      {isActive && (
+        <div style={s.customEditor}>
+          <ColorInput label="background" value={colors.bg}     onChange={v => onChange({ bg: v })} />
+          <ColorInput label="accent"     value={colors.accent} onChange={v => onChange({ accent: v })} />
+          <ColorInput label="text"       value={colors.text}   onChange={v => onChange({ text: v })} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ColorInput({ label, value, onChange }) {
+  const [draft, setDraft] = useState(value)
+  const pickerRef = useRef()
+
+  useEffect(() => { setDraft(value) }, [value])
+
+  function apply(raw) {
+    const v = raw.trim()
+    const h = v.startsWith('#') ? v : '#' + v
+    if (/^#[0-9a-f]{6}$/i.test(h)) onChange(h)
+  }
+
+  return (
+    <div style={s.colorInputRow}>
+      <span style={s.colorInputLabel}>{label}</span>
+      <label style={{ ...s.colorSwatch, background: value }} title="click to open color picker">
+        <input
+          ref={pickerRef}
+          type="color"
+          value={value}
+          style={{ position: 'absolute', opacity: 0, width: 0, height: 0, pointerEvents: 'none' }}
+          onChange={e => { onChange(e.target.value); setDraft(e.target.value) }}
+        />
+      </label>
+      <input
+        type="text"
+        value={draft}
+        maxLength={7}
+        spellCheck={false}
+        style={s.colorHexInput}
+        onChange={e => { setDraft(e.target.value); apply(e.target.value) }}
+        onBlur={() => { apply(draft); setDraft(value) }}
+        onKeyDown={e => { if (e.key === 'Enter') apply(draft) }}
+      />
+    </div>
+  )
+}
+
 // ── Theme chip ─────────────────────────────────────────────────────────────
 
 function ThemeChip({ theme, isActive, onSelect }) {
@@ -359,4 +439,27 @@ const s = {
   },
   newSwatchRow: { display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 },
   newSwatch: { width: 16, height: 16, borderRadius: 2, border: 'none', cursor: 'pointer', padding: 0 },
+
+  customEditor: {
+    display: 'flex', flexDirection: 'column', gap: 6,
+    padding: '10px 12px',
+    background: 'var(--bg-raised)', border: '0.5px solid var(--border-subtle)',
+    borderRadius: 4, marginTop: 2,
+  },
+  colorInputRow: { display: 'flex', alignItems: 'center', gap: 8 },
+  colorInputLabel: {
+    fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)',
+    letterSpacing: '0.06em', width: 80, flexShrink: 0,
+  },
+  colorSwatch: {
+    width: 22, height: 22, borderRadius: 3, flexShrink: 0,
+    border: '0.5px solid var(--border-mid)', cursor: 'pointer',
+    position: 'relative', display: 'block',
+  },
+  colorHexInput: {
+    flex: 1, fontSize: 11, color: 'var(--text-secondary)',
+    background: 'var(--bg-base)', border: '0.5px solid var(--border-mid)',
+    borderRadius: 3, padding: '4px 8px',
+    fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', outline: 'none',
+  },
 }

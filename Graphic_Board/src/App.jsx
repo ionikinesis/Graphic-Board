@@ -11,17 +11,19 @@ import { useRootDirectory } from './hooks/useRootDirectory.js'
 import { useFavourites } from './hooks/useFavourites.js'
 import { useFolderMeta } from './hooks/useFolderMeta.js'
 import { useAppSettings } from './hooks/useAppSettings.js'
+import { useConfigFile } from './hooks/useConfigFile.js'
 
 export default function App() {
   const { rootHandle, rootName, status: rootStatus, chooseRoot, grantPermission, clearRoot } = useRootDirectory()
   const {
     stack, folders, hasImages, loading, breadcrumb, currentHandle,
     canGoBack, canGoForward, navigateInto, navigateToPath, goBack, goForward,
-    loadImages, getImageUrl,
+    loadImages, getImageUrl, refreshCurrent,
   } = useNavigator(rootHandle)
-  const { favourites, toggle: toggleFav, isFavourited } = useFavourites()
-  const folderMeta = useFolderMeta()
-  const { settings, update: updateSettings } = useAppSettings()
+  const { config, configReady, updateConfig } = useConfigFile(rootHandle)
+  const { favourites, toggle: toggleFav, isFavourited } = useFavourites(config, updateConfig)
+  const folderMeta = useFolderMeta(config, updateConfig)
+  const { settings, update: updateSettings, customColors, updateCustomColors } = useAppSettings(config, updateConfig)
 
   const [iconSize,     setIconSize]     = useState('medium')
   const [sortBy,       setSortBy]       = useState('alpha')
@@ -65,7 +67,7 @@ export default function App() {
   // parentPath for FolderGrid metadata keying
   const parentPath = [rootHandle?.name, ...stack.map(s => s.name)].filter(Boolean).join('/')
 
-  if (rootStatus === 'loading') {
+  if (rootStatus === 'loading' || (rootStatus === 'ready' && !configReady)) {
     return (
       <div style={styles.app}>
         <div style={styles.bootScreen}><div style={styles.bootText}>loading...</div></div>
@@ -125,6 +127,7 @@ export default function App() {
                     sortBy={sortBy}
                     iconSize={iconSize}
                     groupBy={groupBy}
+                    onRenameComplete={refreshCurrent}
                   />
                 )}
 
@@ -170,6 +173,8 @@ export default function App() {
           onSetScale={scale => updateSettings({ scale })}
           currentTheme={settings.theme}
           onSetTheme={theme => updateSettings({ theme })}
+          customColors={customColors}
+          onSetCustomColors={updateCustomColors}
           tagManager={folderMeta}
         />
       )}
@@ -180,7 +185,8 @@ export default function App() {
 const styles = {
   app: {
     display: 'flex', flexDirection: 'column',
-    height: '100vh', width: '100vw',
+    height: 'calc(100vh / var(--app-scale, 1))',
+    width: 'calc(100vw / var(--app-scale, 1))',
     background: 'var(--bg-base)', overflow: 'hidden',
   },
   bootScreen: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' },
