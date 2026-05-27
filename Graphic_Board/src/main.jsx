@@ -1,10 +1,18 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.jsx'
 import './index.css'
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-)
+const isBoard = new URLSearchParams(window.location.search).has('board')
+
+async function mount() {
+  const root = ReactDOM.createRoot(document.getElementById('root'))
+  if (isBoard) {
+    const { default: BoardView } = await import('./BoardView.jsx')
+    root.render(<BoardView />)
+  } else {
+    const { default: App } = await import('./App.jsx')
+    root.render(<React.StrictMode><App /></React.StrictMode>)
+  }
+}
+
+mount()

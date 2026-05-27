@@ -26,7 +26,6 @@ export default function ContextMenu({ x, y, items, onClose }) {
     it.tagRow      ? 60 :
     it.linkRow     ? 90 :
     it.sortNameRow ? 52 :
-    it.renameRow   ? 30 :
     30
   ), 8)
   const left  = Math.min(x, window.innerWidth  - menuW - 8)
@@ -44,7 +43,6 @@ export default function ContextMenu({ x, y, items, onClose }) {
         if (item.tagRow)      return <TagRow key={i} tags={item.tags} onChange={item.onChange} allTags={item.allTags} getTagColor={item.getTagColor} />
         if (item.linkRow)     return <LinkRow key={i} link={item.link} onChange={item.onChange} onClose={onClose} />
         if (item.sortNameRow) return <SortNameRow key={i} name={item.name} sortName={item.sortName} onSet={item.onSet} onClose={onClose} />
-        if (item.renameRow)   return <RenameRow key={i} name={item.name} onRename={item.onRename} onClose={onClose} />
         return (
           <MenuItem key={i} item={item} onClose={onClose} />
         )
@@ -361,57 +359,6 @@ function SortNameRow({ name, sortName, onSet, onClose }) {
   )
 }
 
-function RenameRow({ name, onRename, onClose }) {
-  const [editing, setEditing] = useState(false)
-  const [draft,   setDraft]   = useState(name)
-  const [error,   setError]   = useState(null)
-
-  async function save() {
-    const newName = draft.trim()
-    if (!newName || newName === name) { setEditing(false); return }
-    try {
-      await onRename(newName)
-      onClose()
-    } catch {
-      setError('rename failed')
-      setTimeout(() => setError(null), 1500)
-    }
-  }
-
-  if (!editing) {
-    return (
-      <button style={s.item} onClick={() => { setDraft(name); setEditing(true) }}>
-        <span style={s.icon}>✎</span>
-        <span style={{ flex: 1 }}>rename</span>
-      </button>
-    )
-  }
-
-  return (
-    <div style={s.linkSection} onMouseDown={e => e.stopPropagation()}>
-      <div style={s.linkHeader}>
-        <span style={{ ...s.linkLabel, color: error ? '#e05050' : undefined }}>{error || 'rename'}</span>
-      </div>
-      <input
-        type="text"
-        value={draft}
-        autoFocus
-        spellCheck={false}
-        style={s.linkInput}
-        onChange={e => setDraft(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') save()
-          if (e.key === 'Escape') setEditing(false)
-        }}
-        onFocus={e => e.target.select()}
-      />
-      <div style={s.linkActions}>
-        <button style={s.linkSave} onClick={save}>save</button>
-        <button style={s.linkCancel} onClick={() => setEditing(false)}>cancel</button>
-      </div>
-    </div>
-  )
-}
 
 const s = {
   menu: {

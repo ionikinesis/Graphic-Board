@@ -7,10 +7,11 @@ export function useFolderMeta(config, updateConfig) {
   const [favs,      setFavs]      = useState(() => new Set())
   const [tags,      setTags]      = useState({})
   const [tagColors, setTagColors] = useState({})
-  const [links,     setLinks]     = useState({})
+  const [links,      setLinks]      = useState({})
   const [folderOrd,  setFolderOrd]  = useState({})
   const [imageOrd,   setImageOrd]   = useState({})
   const [sortNames,  setSortNames]  = useState({})
+  const [folderModes, setFolderModes] = useState({})
 
   // Hydrate all state from config once loaded
   useEffect(() => {
@@ -24,6 +25,7 @@ export function useFolderMeta(config, updateConfig) {
     setFolderOrd(config.folderOrder   ?? {})
     setImageOrd(config.imageOrder     ?? {})
     setSortNames(config.sortNames     ?? {})
+    setFolderModes(config.folderModes ?? {})
   }, [config])
 
   // ── folder color ─────────────────────────────────────────────────────────
@@ -171,6 +173,19 @@ export function useFolderMeta(config, updateConfig) {
     })
   }, [updateConfig])
 
+  // ── folder mode (grid | board) ────────────────────────────────────────────
+  const getFolderMode = useCallback((pathKey) => folderModes[pathKey] ?? 'grid', [folderModes])
+
+  const setFolderMode = useCallback((pathKey, mode) => {
+    setFolderModes(prev => {
+      const next = { ...prev }
+      if (mode === 'grid') delete next[pathKey]
+      else next[pathKey] = mode
+      updateConfig({ folderModes: next })
+      return next
+    })
+  }, [updateConfig])
+
   // ── tag operations ────────────────────────────────────────────────────────
   const renameTag = useCallback((oldName, newName) => {
     const trimmed = newName.trim().toLowerCase()
@@ -240,5 +255,6 @@ export function useFolderMeta(config, updateConfig) {
     setFolderOrder, getFolderOrder,
     setImageOrder, getImageOrder,
     getSortName, setSortName,
+    getFolderMode, setFolderMode,
   }
 }

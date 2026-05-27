@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 
 const SORT_OPTIONS = [
   { value: 'alpha',    label: 'A – Z'           },
@@ -58,7 +58,24 @@ export default function ViewHeader({
   iconSize, onSetIconSize,
   sortBy, onSetSortBy,
   groupBy, onSetGroupBy,
+  onNewFolder,
 }) {
+  const [creating,    setCreating]    = useState(false)
+  const [folderName,  setFolderName]  = useState('')
+  const inputRef = useRef()
+
+  function submitNew() {
+    const name = folderName.trim()
+    if (name) onNewFolder(name)
+    setCreating(false)
+    setFolderName('')
+  }
+
+  function cancelNew() {
+    setCreating(false)
+    setFolderName('')
+  }
+
   return (
     <div style={styles.header}>
       {/* Back / Forward */}
@@ -88,6 +105,28 @@ export default function ViewHeader({
           </React.Fragment>
         ))}
       </div>
+
+      {/* New folder */}
+      {onNewFolder && (creating ? (
+        <div style={styles.newFolderRow}>
+          <input
+            ref={inputRef}
+            autoFocus
+            value={folderName}
+            placeholder="folder name"
+            style={styles.newFolderInput}
+            onChange={e => setFolderName(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter')  { e.stopPropagation(); submitNew() }
+              if (e.key === 'Escape') { e.stopPropagation(); cancelNew() }
+            }}
+          />
+          <button style={styles.newFolderOk} onClick={submitNew}>✓</button>
+          <button style={styles.newFolderCancel} onClick={cancelNew}>✕</button>
+        </div>
+      ) : (
+        <button style={styles.newFolderBtn} onClick={() => setCreating(true)} title="new folder">+ folder</button>
+      ))}
 
       {/* Group By */}
       {onSetGroupBy && (
@@ -188,4 +227,26 @@ const styles = {
     letterSpacing: '0.04em', transition: 'all 0.1s',
   },
   szActive: { background: 'var(--bg-raised)', color: 'var(--accent)', fontWeight: 700 },
+  newFolderBtn: {
+    fontSize: 10, color: 'var(--text-muted)',
+    background: 'var(--bg-raised)', border: '0.5px solid var(--border-subtle)',
+    borderRadius: 'var(--radius-sm)', padding: '3px 9px',
+    cursor: 'pointer', letterSpacing: '0.04em', fontFamily: 'var(--font-mono)',
+    flexShrink: 0, whiteSpace: 'nowrap',
+  },
+  newFolderRow: { display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 },
+  newFolderInput: {
+    fontSize: 11, fontFamily: 'var(--font-mono)',
+    background: 'var(--bg-surface)', color: 'var(--text-primary)',
+    border: '0.5px solid var(--accent)', borderRadius: 'var(--radius-sm)',
+    padding: '3px 7px', outline: 'none', width: 130,
+  },
+  newFolderOk: {
+    fontSize: 10, color: 'var(--accent)',
+    background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px',
+  },
+  newFolderCancel: {
+    fontSize: 10, color: 'var(--text-muted)',
+    background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px',
+  },
 }

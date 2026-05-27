@@ -1,0 +1,812 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react'
+import { writeFilesToDir, getImageFiles, readClipboardImages } from '../utils/fileImport.js'
+
+const GAP     = 14
+const MIN_W   = 60
+const ROW_H   = 240
+const MAX_ROW = 1300
+
+// ── auto-layout ──────────────────────────────────────────────────────────────
+function autoLayout(images, aspects, startY = GAP) {
+  if (images.length === 0) return []
+  const items = []
+  let x = GAP, y = startY, rowW = 0
+
+  images.forEach((img) => {
+    const aspect = aspects[img.name] || 1
+    const w = Math.round(ROW_H * aspect)
+    const h = ROW_H
+
+    if (rowW > 0 && rowW + w + GAP > MAX_ROW) {
+      x = GAP; y += h + GAP; rowW = 0
+    }
+
+    items.push({ id: img.id, type: 'image', x, y, w, h, name: img.name })
+    x += w + GAP; rowW += w + GAP
+  })
+  return items
+}
+
+// ── main component ────────────────────────────────────────────────────────────
+export default function InfiniteCanvas({ images, dirHandle, savedItems, savedViewport, onSave }) {
+  const [pan,         setPan]         = useState(savedViewport ? { x: savedViewport.x, y: savedViewport.y } : { x: 40, y: 40 })
+  const [zoom,        setZoom]        = useState(savedViewport?.zoom ?? 1)
+  const [items,       setItems]       = useState(null)
+  const [imageUrls,   setImageUrls]   = useState({})
+  const [selected,    setSelected]    = useState(() => new Set())
+  const [editingText, setEditingText] = useState(null)
+  const [marquee,     setMarquee]     = useState(null)
+  const [ctxMenu,     setCtxMenu]     = useState(null)
+  const [undoCount,   setUndoCount]   = useState(0)
+  const [canvasCxMenu, setCanvasCxMenu] = useState(null)  // { x, y } for background right-click
+
+  const panRef       = useRef(pan)
+  const zoomRef      = useRef(zoom)
+  const itemsRef     = useRef(items)
+  const selectedRef  = useRef(new Set())
+  const dragRef      = useRef(null)
+  const urlMapRef    = useRef({})
+  const aspectsRef   = useRef({})         // aspect ratios of all loaded images
+  const undoStackRef = useRef([])         // items snapshots for undo
+  const containerRef = useRef()
+  const ctxMenuRef   = useRef()
+  const saveTimerRef = useRef()
+
+  useEffect(() => { panRef.current      = pan      }, [pan])
+  useEffect(() => { zoomRef.current     = zoom     }, [zoom])
+  useEffect(() => { itemsRef.current    = items    }, [items])
+  useEffect(() => { selectedRef.current = selected }, [selected])
+
+  // ── undo helpers ──────────────────────────────────────────────────────────
+  const pushUndo = useCallback(() => {
+    if (!itemsRef.current) return
+    undoStackRef.current = [...undoStackRef.current.slice(-49), itemsRef.current]
+    setUndoCount(undoStackRef.current.length)
+  }, [])
+
+  const undo = useCallback(() => {
+    if (undoStackRef.current.length === 0) return
+    const snapshot = undoStackRef.current[undoStackRef.current.length - 1]
+    undoStackRef.current = undoStackRef.current.slice(0, -1)
+    setUndoCount(undoStackRef.current.length)
+    setItems(snapshot)
+    setSelected(new Set())
+  }, [])
+
+  // ── load images & build aspect map ────────────────────────────────────────
+  useEffect(() => {
+    let mounted = true
+
+    async function run() {
+      const loaded = await Promise.allSettled(images.map(async img => {
+        const file = await img.handle.getFile()
+        const url  = URL.createObjectURL(file)
+        urlMapRef.current[img.name] = url
+        return { img, url }
+      }))
+
+      if (!mounted) return
+      setImageUrls({ ...urlMapRef.current })
+
+      // Always resolve aspects — needed for restore/reset even when savedItems exists
+      const aspects = {}
+      await Promise.allSettled(loaded.map(r => {
+        if (r.status !== 'fulfilled') return Promise.resolve()
+        const { img, url } = r.value
+        return new Promise(resolve => {
+          const el = new Image()
+          el.onload  = () => { aspects[img.name] = el.naturalWidth / el.naturalHeight; resolve() }
+          el.onerror = () => { aspects[img.name] = 1; resolve() }
+          el.src = url
+        })
+      }))
+
+      if (!mounted) return
+      aspectsRef.current = aspects
+      setItems(savedItems ?? autoLayout(images, aspects))
+    }
+
+    run()
+
+    return () => {
+      mounted = false
+      Object.values(urlMapRef.current).forEach(u => URL.revokeObjectURL(u))
+      urlMapRef.current = {}
+    }
+  }, [images]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── scheduled save ────────────────────────────────────────────────────────
+  const scheduleSave = useCallback(() => {
+    clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      if (!itemsRef.current) return
+      onSave(itemsRef.current, { x: panRef.current.x, y: panRef.current.y, zoom: zoomRef.current })
+    }, 700)
+  }, [onSave])
+
+  // ── world ↔ screen ────────────────────────────────────────────────────────
+  function screenToWorld(clientX, clientY) {
+    const rect = containerRef.current.getBoundingClientRect()
+    return {
+      x: (clientX - rect.left - panRef.current.x) / zoomRef.current,
+      y: (clientY - rect.top  - panRef.current.y) / zoomRef.current,
+    }
+  }
+
+  // ── close context menu on outside click ───────────────────────────────────
+  useEffect(() => {
+    if (!ctxMenu) return
+    function onDown(e) {
+      if (ctxMenuRef.current && !ctxMenuRef.current.contains(e.target)) setCtxMenu(null)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [ctxMenu])
+
+  // ── wheel zoom (non-passive) ──────────────────────────────────────────────
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    function onWheel(e) {
+      e.preventDefault()
+      const factor  = e.deltaY < 0 ? 1.08 : 0.93
+      const newZoom = Math.max(0.05, Math.min(10, zoomRef.current * factor))
+      const rect    = el.getBoundingClientRect()
+      const mx = e.clientX - rect.left
+      const my = e.clientY - rect.top
+      const newPan = {
+        x: mx - (mx - panRef.current.x) * (newZoom / zoomRef.current),
+        y: my - (my - panRef.current.y) * (newZoom / zoomRef.current),
+      }
+      panRef.current  = newPan
+      zoomRef.current = newZoom
+      setPan(newPan)
+      setZoom(newZoom)
+      scheduleSave()
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [scheduleSave])
+
+  // ── window-level mousemove/mouseup ────────────────────────────────────────
+  useEffect(() => {
+    function onMove(e) {
+      const dr = dragRef.current
+      if (!dr) return
+
+      if (dr.type === 'pan') {
+        const newPan = {
+          x: dr.startPanX + (e.clientX - dr.startX),
+          y: dr.startPanY + (e.clientY - dr.startY),
+        }
+        panRef.current = newPan
+        setPan(newPan)
+        return
+      }
+
+      if (dr.type === 'marquee') {
+        const rect = containerRef.current.getBoundingClientRect()
+        const x1 = dr.startClientX - rect.left
+        const y1 = dr.startClientY - rect.top
+        const x2 = e.clientX - rect.left
+        const y2 = e.clientY - rect.top
+        setMarquee({ x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1) })
+        return
+      }
+
+      if (dr.type === 'move') {
+        const dx = (e.clientX - dr.startMouseX) / zoomRef.current
+        const dy = (e.clientY - dr.startMouseY) / zoomRef.current
+        setItems(prev => prev.map(it => {
+          const start = dr.starts[it.id]
+          if (!start) return it
+          return { ...it, x: start.x + dx, y: start.y + dy }
+        }))
+        return
+      }
+
+      if (dr.type === 'resize') {
+        const dxW   = (e.clientX - dr.startMouseX) / zoomRef.current
+        const newW  = Math.max(MIN_W, dr.startW + dxW)
+        const ratio = newW / dr.startW
+        setItems(prev => prev.map(it => {
+          const start = dr.allStarts[it.id]
+          if (!start) return it
+          const scaledW = Math.max(MIN_W, start.w * ratio)
+          return it.type === 'image'
+            ? { ...it, w: scaledW, h: start.aspect ? Math.round(scaledW / start.aspect) : Math.round(start.h * ratio) }
+            : { ...it, w: scaledW }
+        }))
+      }
+    }
+
+    function onUp(e) {
+      const dr = dragRef.current
+      if (!dr) return
+
+      if (dr.type === 'marquee') {
+        const rect = containerRef.current?.getBoundingClientRect()
+        if (rect && itemsRef.current) {
+          const x1 = dr.startClientX - rect.left
+          const y1 = dr.startClientY - rect.top
+          const x2 = e.clientX - rect.left
+          const y2 = e.clientY - rect.top
+
+          if (Math.abs(x2 - x1) > 4 || Math.abs(y2 - y1) > 4) {
+            const wMinX = (Math.min(x1, x2) - panRef.current.x) / zoomRef.current
+            const wMinY = (Math.min(y1, y2) - panRef.current.y) / zoomRef.current
+            const wMaxX = (Math.max(x1, x2) - panRef.current.x) / zoomRef.current
+            const wMaxY = (Math.max(y1, y2) - panRef.current.y) / zoomRef.current
+
+            const ids = new Set()
+            itemsRef.current.forEach(it => {
+              const iw = it.w || 200
+              const ih = it.h || 40
+              if (it.x < wMaxX && it.x + iw > wMinX && it.y < wMaxY && it.y + ih > wMinY) ids.add(it.id)
+            })
+            setSelected(ids)
+          }
+        }
+        setMarquee(null)
+      } else if (dr.type === 'move' || dr.type === 'resize') {
+        scheduleSave()
+      }
+
+      dragRef.current = null
+    }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup',   onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup',   onUp)
+    }
+  }, [scheduleSave])
+
+  // ── keyboard ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    function onKey(e) {
+      // Ctrl/Cmd+Z — undo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault()
+        undo()
+        return
+      }
+      if (editingText) return
+      if (selectedRef.current.size === 0) return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault()
+        pushUndo()
+        setItems(prev => prev.filter(it => !selectedRef.current.has(it.id)))
+        setSelected(new Set())
+        scheduleSave()
+      }
+      if (e.key === 'Escape') setSelected(new Set())
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editingText, scheduleSave, undo, pushUndo])
+
+  // ── container mouse handlers ──────────────────────────────────────────────
+  function onContainerMouseDown(e) {
+    if (e.button === 1) {
+      e.preventDefault()
+      dragRef.current = { type: 'pan', startX: e.clientX, startY: e.clientY, startPanX: panRef.current.x, startPanY: panRef.current.y }
+      return
+    }
+    if (e.button === 0 && (e.target === containerRef.current || e.target.classList?.contains('canvas-world'))) {
+      setCtxMenu(null)
+      setCanvasCxMenu(null)
+      if (!e.shiftKey) setSelected(new Set())
+      dragRef.current = { type: 'marquee', startClientX: e.clientX, startClientY: e.clientY }
+    }
+  }
+
+  function onContainerDragOver(e) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+
+  async function onContainerDrop(e) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    const files = getImageFiles(e)
+    if (files.length === 0) return
+    const wp = screenToWorld(e.clientX, e.clientY)
+    await importToCanvas(files, wp.x, wp.y)
+  }
+
+  function onContainerContextMenu(e) {
+    e.preventDefault()
+    // Right-click on blank canvas (not on an item) → show paste option
+    if (e.target === containerRef.current || e.target.classList?.contains('canvas-world')) {
+      setCtxMenu(null)
+      setCanvasCxMenu({ x: e.clientX, y: e.clientY })
+    }
+  }
+
+  function onContainerDoubleClick(e) {
+    if (e.target !== containerRef.current && !e.target.classList?.contains('canvas-world')) return
+    const wp = screenToWorld(e.clientX, e.clientY)
+    const id  = `text-${Date.now()}`
+    const box = { id, type: 'text', x: wp.x - 100, y: wp.y - 16, w: 200, text: '', fontSize: 14 }
+    pushUndo()
+    setItems(prev => [...(prev ?? []), box])
+    setSelected(new Set([id]))
+    setEditingText(id)
+  }
+
+  // ── item drag/select ──────────────────────────────────────────────────────
+  function startItemMove(e, item) {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    setCtxMenu(null)
+
+    if (e.shiftKey) {
+      const next = new Set(selectedRef.current)
+      if (next.has(item.id)) next.delete(item.id)
+      else next.add(item.id)
+      setSelected(next)
+      return
+    }
+
+    let sel = selectedRef.current
+    if (!sel.has(item.id)) {
+      sel = new Set([item.id])
+      setSelected(sel)
+    }
+
+    pushUndo()
+
+    const starts = {}
+    ;(itemsRef.current ?? []).forEach(it => {
+      if (sel.has(it.id)) starts[it.id] = { x: it.x, y: it.y }
+    })
+
+    dragRef.current = { type: 'move', starts, startMouseX: e.clientX, startMouseY: e.clientY }
+  }
+
+  function startResize(e, item) {
+    e.stopPropagation()
+    e.preventDefault()
+    setCtxMenu(null)
+
+    const sel = selectedRef.current.has(item.id) ? selectedRef.current : new Set([item.id])
+
+    pushUndo()
+
+    const allStarts = {}
+    ;(itemsRef.current ?? []).forEach(it => {
+      if (sel.has(it.id)) {
+        allStarts[it.id] = { w: it.w, h: it.h, aspect: it.type === 'image' && it.h ? it.w / it.h : null }
+      }
+    })
+
+    dragRef.current = { type: 'resize', id: item.id, startMouseX: e.clientX, startW: item.w, allStarts }
+  }
+
+  // ── fit all ───────────────────────────────────────────────────────────────
+  function fitAll() {
+    if (!items || items.length === 0) return
+    const pad = 60
+    const minX = Math.min(...items.map(it => it.x))
+    const minY = Math.min(...items.map(it => it.y))
+    const maxX = Math.max(...items.map(it => it.x + (it.w || 200)))
+    const maxY = Math.max(...items.map(it => it.y + (it.h || it.w || 200)))
+    const cW   = containerRef.current.clientWidth  - pad * 2
+    const cH   = containerRef.current.clientHeight - pad * 2
+    const newZ = Math.min(cW / (maxX - minX), cH / (maxY - minY), 2)
+    const newP = {
+      x: pad + (cW - (maxX - minX) * newZ) / 2 - minX * newZ,
+      y: pad + (cH - (maxY - minY) * newZ) / 2 - minY * newZ,
+    }
+    panRef.current  = newP
+    zoomRef.current = newZ
+    setPan(newP); setZoom(newZ)
+    scheduleSave()
+  }
+
+  // ── reset: pan/zoom to default + restore any deleted images ──────────────
+  function resetView() {
+    pushUndo()
+    const existingIds = new Set((items || []).filter(it => it.type === 'image').map(it => it.id))
+    const missing = images.filter(img => !existingIds.has(img.id))
+    if (missing.length > 0) {
+      const maxY = (items || []).length > 0
+        ? Math.max(...(items || []).map(it => it.y + (it.h || 100))) + GAP * 2
+        : GAP
+      const restored = autoLayout(missing, aspectsRef.current, maxY)
+      setItems(prev => [...(prev || []), ...restored])
+    }
+    const p = { x: 40, y: 40 }
+    panRef.current  = p
+    zoomRef.current = 1
+    setPan(p); setZoom(1)
+    scheduleSave()
+  }
+
+  // ── import files into canvas (drop or paste) ─────────────────────────────
+  const importToCanvas = useCallback(async (files, worldX, worldY) => {
+    if (!dirHandle || files.length === 0) return
+    pushUndo()
+    const written = await writeFilesToDir(dirHandle, files)
+    if (written.length === 0) return
+
+    const newItems = []
+    const newUrls  = {}
+    let layoutX = worldX ?? ((containerRef.current?.clientWidth  ?? 800)  / 2 - panRef.current.x) / zoomRef.current
+    let layoutY = worldY ?? ((containerRef.current?.clientHeight ?? 600) / 2 - panRef.current.y) / zoomRef.current
+    let rowW = 0
+
+    for (const { name, handle } of written) {
+      const file = await handle.getFile()
+      const url  = URL.createObjectURL(file)
+      urlMapRef.current[name] = url
+      newUrls[name] = url
+
+      const aspect = await new Promise(resolve => {
+        const el = new Image()
+        el.onload  = () => resolve(el.naturalWidth / el.naturalHeight)
+        el.onerror = () => resolve(1)
+        el.src = url
+      })
+      aspectsRef.current[name] = aspect
+
+      const w = Math.round(ROW_H * aspect)
+      const h = ROW_H
+      if (rowW > 0 && rowW + w + GAP > MAX_ROW) {
+        layoutX = worldX ?? layoutX - rowW
+        layoutY += h + GAP
+        rowW = 0
+      }
+      newItems.push({ id: name, type: 'image', x: layoutX + rowW, y: layoutY, w, h, name })
+      rowW += w + GAP
+    }
+
+    setImageUrls(prev => ({ ...prev, ...newUrls }))
+    setItems(prev => [...(prev ?? []), ...newItems])
+    scheduleSave()
+  }, [dirHandle, pushUndo, scheduleSave])
+
+  // ── paste event (Ctrl+V) ──────────────────────────────────────────────────
+  useEffect(() => {
+    async function onPaste(e) {
+      if (e.target.tagName === 'TEXTAREA') return
+      const files = getImageFiles(e)
+      if (files.length === 0 || !dirHandle) return
+      e.preventDefault()
+      await importToCanvas(files)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [dirHandle, importToCanvas])
+
+  // ── restore deleted: add missing images below existing content ────────────
+  function restoreDeleted() {
+    if (!items) return
+    const existingIds = new Set(items.filter(it => it.type === 'image').map(it => it.id))
+    const missing = images.filter(img => !existingIds.has(img.id))
+    if (missing.length === 0) return
+    pushUndo()
+    const maxY = items.length > 0
+      ? Math.max(...items.map(it => it.y + (it.h || 100))) + GAP * 2
+      : GAP
+    const restored = autoLayout(missing, aspectsRef.current, maxY)
+    setItems(prev => [...prev, ...restored])
+    scheduleSave()
+  }
+
+  // ── delete via context menu ───────────────────────────────────────────────
+  function deleteById(id) {
+    pushUndo()
+    setItems(prev => prev.filter(it => it.id !== id))
+    setSelected(prev => { const n = new Set(prev); n.delete(id); return n })
+    setCtxMenu(null)
+    scheduleSave()
+  }
+
+  function deleteFromFolder(id, name) {
+    pushUndo()
+    setItems(prev => prev.filter(it => it.id !== id))
+    setSelected(prev => { const n = new Set(prev); n.delete(id); return n })
+    setCtxMenu(null)
+    dirHandle?.removeEntry(name).catch(err => console.warn('delete from folder failed:', err))
+    scheduleSave()
+  }
+
+  // ── render ────────────────────────────────────────────────────────────────
+  const deletedCount = items
+    ? images.filter(img => !items.some(it => it.type === 'image' && it.id === img.id)).length
+    : 0
+
+  return (
+    <div
+      ref={containerRef}
+      style={s.container}
+      tabIndex={0}
+      onMouseDown={onContainerMouseDown}
+      onDoubleClick={onContainerDoubleClick}
+      onDragOver={onContainerDragOver}
+      onDrop={onContainerDrop}
+      onContextMenu={onContainerContextMenu}
+    >
+      {!items ? (
+        <div style={s.loadingOverlay}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', letterSpacing: '0.1em' }}>loading images…</span>
+        </div>
+      ) : (
+        <>
+          {/* World */}
+          <div
+            className="canvas-world"
+            style={{ ...s.world, transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}
+          >
+            {items.map(item => item.type === 'image'
+              ? <ImageItem
+                  key={item.id}
+                  item={item}
+                  url={imageUrls[item.name]}
+                  isSelected={selected.has(item.id)}
+                  onMouseDown={startItemMove}
+                  onResizeStart={startResize}
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, id: item.id, type: 'image', name: item.name }) }}
+                />
+              : <TextItem
+                  key={item.id}
+                  item={item}
+                  isSelected={selected.has(item.id)}
+                  isEditing={editingText === item.id}
+                  onMouseDown={startItemMove}
+                  onResizeStart={startResize}
+                  onStartEdit={() => { pushUndo(); setEditingText(item.id); setSelected(new Set([item.id])) }}
+                  onStopEdit={() => { setEditingText(null); scheduleSave() }}
+                  onChange={text => setItems(prev => prev.map(it => it.id === item.id ? { ...it, text } : it))}
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, id: item.id, type: 'text' }) }}
+                />
+            )}
+          </div>
+
+          {/* Marquee selection rect */}
+          {marquee && marquee.w > 2 && marquee.h > 2 && (
+            <div style={{ ...s.marquee, left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />
+          )}
+
+          {/* Item right-click context menu */}
+          {ctxMenu && (
+            <div ref={ctxMenuRef} style={{ ...s.ctxMenu, left: ctxMenu.x, top: ctxMenu.y }}>
+              <button style={s.ctxItem} onClick={() => deleteById(ctxMenu.id)}>
+                {ctxMenu.type === 'image' ? 'remove from board' : 'delete'}
+              </button>
+              {ctxMenu.type === 'image' && dirHandle && (
+                <button
+                  style={{ ...s.ctxItem, color: 'var(--text-muted)' }}
+                  onClick={() => deleteFromFolder(ctxMenu.id, ctxMenu.name)}
+                >delete from folder</button>
+              )}
+            </div>
+          )}
+
+          {/* Canvas background right-click menu */}
+          {canvasCxMenu && (
+            <div
+              style={{ ...s.ctxMenu, left: canvasCxMenu.x, top: canvasCxMenu.y }}
+              onMouseDown={e => e.stopPropagation()}
+            >
+              <button style={s.ctxItem} onClick={async () => {
+                const pos = { ...canvasCxMenu }
+                setCanvasCxMenu(null)
+                const files = await readClipboardImages()
+                if (files.length > 0) {
+                  const wp = screenToWorld(pos.x, pos.y)
+                  await importToCanvas(files, wp.x, wp.y)
+                }
+              }}>paste image</button>
+            </div>
+          )}
+
+          {/* HUD */}
+          <div style={s.hud}>
+            <button
+              style={{ ...s.hudBtn, opacity: undoCount > 0 ? 1 : 0.3, cursor: undoCount > 0 ? 'pointer' : 'default' }}
+              onClick={undo}
+            >undo</button>
+            <span style={s.hudDot}>·</span>
+            <span style={s.hudZoom}>{Math.round(zoom * 100)}%</span>
+            <span style={s.hudDot}>·</span>
+            <button style={s.hudBtn} onClick={fitAll}>fit</button>
+            <button style={s.hudBtn} onClick={resetView}>reset</button>
+            {deletedCount > 0 && (
+              <button style={{ ...s.hudBtn, color: 'var(--text-secondary)' }} onClick={restoreDeleted}>
+                restore ({deletedCount})
+              </button>
+            )}
+            <span style={s.hudDot}>·</span>
+            <span style={s.hudHint}>scroll=zoom · middle=pan · drag=select · shift+click=add · del=remove · ctrl+z=undo</span>
+          </div>
+
+          {images.length === 0 && (
+            <div style={s.emptyHint}>this folder has no images</div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ── image item ────────────────────────────────────────────────────────────────
+function ImageItem({ item, url, isSelected, onMouseDown, onResizeStart, onContextMenu }) {
+  return (
+    <div
+      style={{
+        ...s.item,
+        left: item.x, top: item.y, width: item.w, height: item.h,
+        outline: isSelected ? '1.5px solid var(--accent)' : '1px solid rgba(255,255,255,0.07)',
+        cursor: 'grab',
+      }}
+      onMouseDown={e => onMouseDown(e, item)}
+      onContextMenu={onContextMenu}
+    >
+      {url
+        ? <img src={url} alt={item.name} style={s.img} draggable={false} />
+        : <div style={s.imgPlaceholder} />
+      }
+      {isSelected && (
+        <div style={s.resizeHandle} onMouseDown={e => onResizeStart(e, item)} />
+      )}
+    </div>
+  )
+}
+
+// ── text item ─────────────────────────────────────────────────────────────────
+function TextItem({ item, isSelected, isEditing, onMouseDown, onResizeStart, onStartEdit, onStopEdit, onChange, onContextMenu }) {
+  return (
+    <div
+      style={{
+        ...s.textItem,
+        left: item.x, top: item.y, width: item.w,
+        outline: isSelected ? '1px solid var(--accent)' : '1px solid transparent',
+        cursor: isEditing ? 'text' : 'grab',
+      }}
+      onMouseDown={e => { if (!isEditing) onMouseDown(e, item) }}
+      onDoubleClick={e => { e.stopPropagation(); onStartEdit() }}
+      onContextMenu={onContextMenu}
+    >
+      {isEditing
+        ? <textarea
+            autoFocus
+            value={item.text}
+            placeholder="type here…"
+            style={{ ...s.textarea, fontSize: item.fontSize }}
+            onChange={e => onChange(e.target.value)}
+            onBlur={onStopEdit}
+            onMouseDown={e => e.stopPropagation()}
+            onKeyDown={e => {
+              e.stopPropagation()
+              if (e.key === 'Escape') onStopEdit()
+            }}
+          />
+        : <div style={{ ...s.textDisplay, fontSize: item.fontSize }}>
+            {item.text
+              ? <span style={{ whiteSpace: 'pre-wrap' }}>{item.text}</span>
+              : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>text box — double-click to edit</span>
+            }
+          </div>
+      }
+      {isSelected && !isEditing && (
+        <div
+          style={{ ...s.resizeHandle, cursor: 'ew-resize', bottom: '50%', transform: 'translateY(50%)' }}
+          onMouseDown={e => onResizeStart(e, item)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── styles ────────────────────────────────────────────────────────────────────
+const s = {
+  container: {
+    position: 'fixed', inset: 0,
+    overflow: 'hidden',
+    background: 'var(--bg-deep)',
+    userSelect: 'none',
+    outline: 'none',
+  },
+  loadingOverlay: {
+    position: 'absolute', inset: 0,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  world: {
+    position: 'absolute', top: 0, left: 0,
+    transformOrigin: '0 0',
+  },
+  item: {
+    position: 'absolute',
+    borderRadius: 3,
+    overflow: 'hidden',
+    background: 'var(--bg-base)',
+  },
+  img: {
+    display: 'block', width: '100%', height: '100%',
+    objectFit: 'cover', pointerEvents: 'none',
+  },
+  imgPlaceholder: {
+    width: '100%', height: '100%',
+    background: 'var(--bg-surface)',
+  },
+  textItem: {
+    position: 'absolute',
+    minHeight: 32,
+    padding: '6px 8px',
+    borderRadius: 3,
+  },
+  textarea: {
+    display: 'block', width: '100%', minHeight: 60,
+    background: 'transparent', border: 'none', outline: 'none',
+    resize: 'none', color: 'var(--text-primary)',
+    fontFamily: 'var(--font-mono)', lineHeight: 1.55, padding: 0,
+  },
+  textDisplay: {
+    color: 'var(--text-primary)',
+    fontFamily: 'var(--font-mono)',
+    lineHeight: 1.55, wordBreak: 'break-word',
+  },
+  resizeHandle: {
+    position: 'absolute', right: 3, bottom: 3,
+    width: 10, height: 10,
+    background: 'var(--accent)', borderRadius: 2,
+    cursor: 'se-resize', zIndex: 10,
+    boxShadow: '0 0 0 1px rgba(0,0,0,0.5)',
+  },
+  marquee: {
+    position: 'absolute',
+    border: '1.5px solid var(--accent)',
+    background: 'rgba(100,160,220,0.08)',
+    pointerEvents: 'none',
+    borderRadius: 2,
+  },
+  ctxMenu: {
+    position: 'absolute',
+    background: 'var(--bg-surface)',
+    border: '0.5px solid var(--border-mid)',
+    borderRadius: 6,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+    padding: '4px 0',
+    zIndex: 200,
+    minWidth: 100,
+  },
+  ctxItem: {
+    display: 'block', width: '100%',
+    background: 'transparent', border: 'none',
+    padding: '6px 14px', textAlign: 'left',
+    fontSize: 11, color: 'var(--text-secondary)',
+    fontFamily: 'var(--font-mono)', letterSpacing: '0.04em',
+    cursor: 'pointer',
+  },
+  hud: {
+    position: 'absolute', bottom: 16, left: '50%',
+    transform: 'translateX(-50%)',
+    display: 'flex', alignItems: 'center', gap: 10,
+    background: 'var(--bg-surface)',
+    border: '0.5px solid var(--border-mid)',
+    borderRadius: 20, padding: '6px 16px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+    fontSize: 10, letterSpacing: '0.05em',
+    zIndex: 100, pointerEvents: 'all',
+    whiteSpace: 'nowrap',
+  },
+  hudZoom:  { color: 'var(--text-secondary)', fontWeight: 700, minWidth: 34, textAlign: 'right' },
+  hudDot:   { color: 'var(--border-strong)' },
+  hudBtn: {
+    background: 'transparent', border: 'none', cursor: 'pointer',
+    color: 'var(--accent)', fontSize: 10, padding: '0 2px',
+    letterSpacing: '0.05em', fontFamily: 'var(--font-mono)',
+  },
+  hudHint: { color: 'var(--text-muted)', fontSize: 9, letterSpacing: '0.05em' },
+  emptyHint: {
+    position: 'absolute', top: '50%', left: '50%',
+    transform: 'translate(-50%, -50%)',
+    fontSize: 12, color: 'var(--text-muted)', letterSpacing: '0.08em',
+    pointerEvents: 'none',
+  },
+}

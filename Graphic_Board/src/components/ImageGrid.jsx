@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import ContextMenu from './ContextMenu.jsx'
+import { writeFilesToDir, getImageFiles } from '../utils/fileImport.js'
 
 const COL_W = { small: 100, medium: 140, large: 200 }
 
@@ -41,12 +42,13 @@ export default function ImageGrid({
   iconSize = 'medium', hideWhenEmpty, sortBy = 'alpha',
   parentPath = '', folderMeta = null,
 }) {
-  const [loaded,   setLoaded]   = useState([])
-  const [loading,  setLoading]  = useState(true)
-  const [lightbox, setLightbox] = useState(null)
-  const [sizes,    setSizes]    = useState({})
-  const [dragSrc,  setDragSrc]  = useState(null)
-  const [dragOver, setDragOver] = useState(null) // { index, side: 'before'|'after' }
+  const [loaded,       setLoaded]       = useState([])
+  const [loading,      setLoading]      = useState(true)
+  const [lightbox,     setLightbox]     = useState(null)
+  const [sizes,        setSizes]        = useState({})
+  const [dragSrc,      setDragSrc]      = useState(null)
+  const [dragOver,     setDragOver]     = useState(null) // { index, side: 'before'|'after' }
+  const [fileDragging, setFileDragging] = useState(false)
 
   useEffect(() => {
     setLoaded([])
@@ -57,6 +59,21 @@ export default function ImageGrid({
       setLoading(false)
     })
   }, [folderHandle])
+
+  // Ctrl+V paste: write clipboard image into this folder then reload
+  useEffect(() => {
+    async function onPaste(e) {
+      const tag = document.activeElement?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      const files = getImageFiles(e)
+      if (files.length === 0 || !folderHandle) return
+      e.preventDefault()
+      await writeFilesToDir(folderHandle, files)
+      loadImages(folderHandle).then(setLoaded)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [folderHandle, loadImages])
 
   // Load file sizes lazily when sortBy === 'size'
   useEffect(() => {
@@ -124,6 +141,11 @@ export default function ImageGrid({
     ))
   }
 
+  function handleDeleteFromFolder(img) {
+    setLoaded(prev => prev.filter(i => i.id !== img.id))
+    folderHandle.removeEntry(img.name).catch(err => console.warn('delete failed:', err))
+  }
+
   function handleDrop(srcIdx, overIdx, side) {
     if (srcIdx === null || overIdx === null || srcIdx === overIdx) {
       setDragSrc(null); setDragOver(null); return
@@ -138,8 +160,28 @@ export default function ImageGrid({
     setDragOver(null)
   }
 
+  async function handleFileDrop(e) {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    setFileDragging(false)
+    const files = getImageFiles(e)
+    if (files.length === 0 || !folderHandle) return
+    await writeFilesToDir(folderHandle, files)
+    loadImages(folderHandle).then(setLoaded)
+  }
+
   return (
-    <>
+    <div
+      style={{ position: 'relative' }}
+      onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setFileDragging(true) } }}
+      onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setFileDragging(false) }}
+      onDrop={handleFileDrop}
+    >
+      {fileDragging && (
+        <div style={styles.dropOverlay}>
+          <span style={styles.dropHint}>drop images here to add to folder</span>
+        </div>
+      )}
       <div style={{ ...styles.grid, gridTemplateColumns: `repeat(auto-fill, minmax(${colSize}px, 1fr))` }}>
         {sorted.map((img, fi) => (
           <ImageCard
@@ -152,6 +194,7 @@ export default function ImageGrid({
             pathKey={parentPath ? `${parentPath}/${img.name}` : img.name}
             folderMeta={folderMeta}
             onRenameImage={handleImageRename}
+            onDeleteFromFolder={() => handleDeleteFromFolder(img)}
             canDrag={canDrag}
             isDragging={canDrag && dragSrc === fi}
             isDragOver={canDrag && dragOver?.index === fi ? dragOver.side : null}
@@ -183,7 +226,7 @@ export default function ImageGrid({
           onNext={() => navigateLightbox(1)}
         />
       )}
-    </>
+    </div>
   )
 }
 
@@ -231,7 +274,7 @@ function ImageCard({
   image, getImageUrl, favourited, onToggleFavourite, onOpen, pathKey, folderMeta,
   canDrag, isDragging, isDragOver,
   onDragStart, onDragOver, onDragLeave, onDrop, onDragEnd,
-  onRenameImage,
+  onRenameImage, onDeleteFromFolder,
 }) {
   const [url,         setUrl]         = useState(null)
   const [hovered,     setHovered]     = useState(false)
@@ -277,6 +320,10 @@ function ImageCard({
       feedback: 'copied!',
       onClick: () => navigator.clipboard.writeText(image.name).catch(() => {}),
     },
+    ...(onDeleteFromFolder ? [
+      { separator: true },
+      { label: 'delete from folder', icon: '✕', onClick: onDeleteFromFolder },
+    ] : []),
   ]
 
   return (
@@ -341,6 +388,18 @@ function ImageCard({
 }
 
 const styles = {
+  dropOverlay: {
+    position: 'absolute', inset: 0, zIndex: 50,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'rgba(var(--accent-rgb, 74,159,212), 0.08)',
+    border: '2px dashed var(--accent)',
+    borderRadius: 6, pointerEvents: 'none',
+  },
+  dropHint: {
+    fontSize: 11, color: 'var(--accent)', letterSpacing: '0.08em',
+    background: 'var(--bg-surface)', padding: '6px 14px', borderRadius: 20,
+    border: '0.5px solid var(--border-mid)',
+  },
   lightboxBackdrop: {
     position: 'fixed', inset: 0,
     background: 'rgba(0,0,0,0.92)',

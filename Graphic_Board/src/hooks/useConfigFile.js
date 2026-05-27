@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { readConfig, writeConfig, migrateFromLocalStorage } from '../utils/configFile.js'
 
-const DEBOUNCE_MS = 800
+const DEBOUNCE_MS = 600
 
 export function useConfigFile(rootHandle) {
   const [config, setConfig] = useState(null)
@@ -22,6 +22,19 @@ export function useConfigFile(rootHandle) {
     })
   }, [rootHandle])
 
+  // Flush any pending write immediately when the page is about to close
+  useEffect(() => {
+    function onBeforeUnload() {
+      if (timerRef.current && rootRef.current && latestRef.current) {
+        clearTimeout(timerRef.current)
+        timerRef.current = null
+        writeConfig(rootRef.current, latestRef.current)
+      }
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [])
+
   const updateConfig = useCallback((patch) => {
     const next = { ...latestRef.current, ...patch }
     latestRef.current = next
@@ -29,6 +42,7 @@ export function useConfigFile(rootHandle) {
 
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
+      timerRef.current = null
       if (rootRef.current) writeConfig(rootRef.current, latestRef.current)
     }, DEBOUNCE_MS)
   }, [])

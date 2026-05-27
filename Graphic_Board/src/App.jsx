@@ -30,6 +30,15 @@ export default function App() {
   const [groupBy,      setGroupBy]      = useState('none')
   const [settingsOpen, setSettingsOpen] = useState(false)
 
+  // Sync view settings from config on initial load
+  useEffect(() => {
+    if (!config?.viewSettings) return
+    const vs = config.viewSettings
+    if (vs.iconSize) setIconSize(vs.iconSize)
+    if (vs.sortBy)   setSortBy(vs.sortBy)
+    if (vs.groupBy)  setGroupBy(vs.groupBy)
+  }, [configReady]) // only run once when config first becomes ready
+
   // Mouse back/forward buttons (button 3 = back, button 4 = forward)
   useEffect(() => {
     function onMouseUp(e) {
@@ -43,9 +52,18 @@ export default function App() {
   async function handleChooseRoot() { setSettingsOpen(false); await chooseRoot() }
   async function handleClearRoot()  { setSettingsOpen(false); await clearRoot()  }
 
+  function handleSetSortBy(val)   { setSortBy(val);   updateConfig({ viewSettings: { sortBy: val,  groupBy, iconSize } }) }
+  function handleSetGroupBy(val)  { setGroupBy(val);  updateConfig({ viewSettings: { sortBy, groupBy: val,  iconSize } }) }
+  function handleSetIconSize(val) { setIconSize(val); updateConfig({ viewSettings: { sortBy, groupBy, iconSize: val  } }) }
+
   // Record recently-opened when navigating into a folder
   function handleNavigateInto(folder) {
     const pathKey = [...(rootHandle ? [rootHandle.name] : []), ...stack.map(s => s.name), folder.name].join('/')
+    if (folderMeta.getFolderMode(pathKey) === 'board') {
+      const winName = 'board_' + encodeURIComponent(pathKey)
+      window.open(`/?board&path=${encodeURIComponent(pathKey)}`, winName)
+      return
+    }
     folderMeta.touchFolder(pathKey)
     navigateInto(folder)
   }
@@ -109,11 +127,15 @@ export default function App() {
                 onGoBack={goBack}
                 onGoForward={goForward}
                 iconSize={iconSize}
-                onSetIconSize={setIconSize}
+                onSetIconSize={handleSetIconSize}
                 sortBy={sortBy}
-                onSetSortBy={setSortBy}
+                onSetSortBy={handleSetSortBy}
                 groupBy={groupBy}
-                onSetGroupBy={setGroupBy}
+                onSetGroupBy={handleSetGroupBy}
+                onNewFolder={currentHandle ? async name => {
+                  await currentHandle.getDirectoryHandle(name, { create: true }).catch(() => {})
+                  refreshCurrent()
+                } : null}
               />
 
               <div style={styles.contentArea}>
@@ -127,7 +149,14 @@ export default function App() {
                     sortBy={sortBy}
                     iconSize={iconSize}
                     groupBy={groupBy}
-                    onRenameComplete={refreshCurrent}
+                    onNewFolder={currentHandle ? async name => {
+                      await currentHandle.getDirectoryHandle(name, { create: true }).catch(() => {})
+                      refreshCurrent()
+                    } : null}
+                    onDeleteFolder={currentHandle ? async name => {
+                      await currentHandle.removeEntry(name, { recursive: true }).catch(() => {})
+                      refreshCurrent()
+                    } : null}
                   />
                 )}
 
