@@ -143,25 +143,37 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
     return () => window.removeEventListener('mousedown', onDown)
   }, [ctxMenu])
 
-  // ── wheel zoom (non-passive) ──────────────────────────────────────────────
+  // ── wheel: pinch=zoom, two-finger-scroll=pan (non-passive) ──────────────
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     function onWheel(e) {
       e.preventDefault()
-      const factor  = e.deltaY < 0 ? 1.08 : 0.93
-      const newZoom = Math.max(0.05, Math.min(10, zoomRef.current * factor))
-      const rect    = el.getBoundingClientRect()
-      const mx = e.clientX - rect.left
-      const my = e.clientY - rect.top
-      const newPan = {
-        x: mx - (mx - panRef.current.x) * (newZoom / zoomRef.current),
-        y: my - (my - panRef.current.y) * (newZoom / zoomRef.current),
+      if (e.ctrlKey) {
+        // Pinch gesture or Ctrl+scroll → zoom toward cursor
+        const factor  = e.deltaY < 0 ? 1.08 : 0.93
+        const newZoom = Math.max(0.05, Math.min(10, zoomRef.current * factor))
+        const rect    = el.getBoundingClientRect()
+        const mx = e.clientX - rect.left
+        const my = e.clientY - rect.top
+        const newPan = {
+          x: mx - (mx - panRef.current.x) * (newZoom / zoomRef.current),
+          y: my - (my - panRef.current.y) * (newZoom / zoomRef.current),
+        }
+        panRef.current  = newPan
+        zoomRef.current = newZoom
+        setPan(newPan)
+        setZoom(newZoom)
+      } else {
+        // Two-finger scroll → pan
+        const mult   = e.deltaMode === 0 ? 1 : e.deltaMode === 1 ? 30 : 300
+        const newPan = {
+          x: panRef.current.x - e.deltaX * mult,
+          y: panRef.current.y - e.deltaY * mult,
+        }
+        panRef.current = newPan
+        setPan(newPan)
       }
-      panRef.current  = newPan
-      zoomRef.current = newZoom
-      setPan(newPan)
-      setZoom(newZoom)
       scheduleSave()
     }
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -209,13 +221,23 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
         const dxW   = (e.clientX - dr.startMouseX) / zoomRef.current
         const newW  = Math.max(MIN_W, dr.startW + dxW)
         const ratio = newW / dr.startW
+        const multi = dr.groupX !== null
         setItems(prev => prev.map(it => {
           const start = dr.allStarts[it.id]
           if (!start) return it
           const scaledW = Math.max(MIN_W, start.w * ratio)
-          return it.type === 'image'
-            ? { ...it, w: scaledW, h: start.aspect ? Math.round(scaledW / start.aspect) : Math.round(start.h * ratio) }
+          const scaledH = start.aspect ? Math.round(scaledW / start.aspect) : Math.round(start.h * ratio)
+          const base = it.type === 'image'
+            ? { ...it, w: scaledW, h: scaledH }
             : { ...it, w: scaledW }
+          if (multi) {
+            return {
+              ...base,
+              x: dr.groupX + (start.x - dr.groupX) * ratio,
+              y: dr.groupY + (start.y - dr.groupY) * ratio,
+            }
+          }
+          return base
         }))
       }
     }
@@ -367,23 +389,44 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
     dragRef.current = { type: 'move', starts, startMouseX: e.clientX, startMouseY: e.clientY }
   }
 
+  function startGroupResize(e) {
+    e.stopPropagation()
+    e.preventDefault()
+    const si = (itemsRef.current ?? []).filter(it => selectedRef.current.has(it.id))
+    if (si.length < 2) return
+    const gX     = Math.min(...si.map(it => it.x))
+    const gY     = Math.min(...si.map(it => it.y))
+    const startW = Math.max(...si.map(it => it.x + (it.w || 200))) - gX
+    pushUndo()
+    const allStarts = {}
+    si.forEach(it => {
+      allStarts[it.id] = { x: it.x, y: it.y, w: it.w, h: it.h, aspect: it.type === 'image' && it.h ? it.w / it.h : null }
+    })
+    dragRef.current = { type: 'resize', id: null, startMouseX: e.clientX, startW, allStarts, groupX: gX, groupY: gY }
+  }
+
   function startResize(e, item) {
     e.stopPropagation()
     e.preventDefault()
     setCtxMenu(null)
 
-    const sel = selectedRef.current.has(item.id) ? selectedRef.current : new Set([item.id])
+    const sel          = selectedRef.current.has(item.id) ? selectedRef.current : new Set([item.id])
+    const selItems     = (itemsRef.current ?? []).filter(it => sel.has(it.id))
+    const multi        = selItems.length > 1
+    const groupX       = multi ? Math.min(...selItems.map(it => it.x)) : null
+    const groupY       = multi ? Math.min(...selItems.map(it => it.y)) : null
 
     pushUndo()
 
     const allStarts = {}
-    ;(itemsRef.current ?? []).forEach(it => {
-      if (sel.has(it.id)) {
-        allStarts[it.id] = { w: it.w, h: it.h, aspect: it.type === 'image' && it.h ? it.w / it.h : null }
+    selItems.forEach(it => {
+      allStarts[it.id] = {
+        x: it.x, y: it.y, w: it.w, h: it.h,
+        aspect: it.type === 'image' && it.h ? it.w / it.h : null,
       }
     })
 
-    dragRef.current = { type: 'resize', id: item.id, startMouseX: e.clientX, startW: item.w, allStarts }
+    dragRef.current = { type: 'resize', id: item.id, startMouseX: e.clientX, startW: item.w, allStarts, groupX, groupY }
   }
 
   // ── fit all ───────────────────────────────────────────────────────────────
@@ -515,6 +558,18 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
     scheduleSave()
   }
 
+  // ── group selection frame bounds ──────────────────────────────────────────
+  const selItems       = items ? items.filter(it => selected.has(it.id)) : []
+  const showGroupFrame = selItems.length > 1
+  const groupBounds    = showGroupFrame ? (() => {
+    const pad  = 8
+    const minX = Math.min(...selItems.map(it => it.x))
+    const minY = Math.min(...selItems.map(it => it.y))
+    const maxX = Math.max(...selItems.map(it => it.x + (it.w || 200)))
+    const maxY = Math.max(...selItems.map(it => it.y + (it.h || 40)))
+    return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 }
+  })() : null
+
   // ── render ────────────────────────────────────────────────────────────────
   const deletedCount = items
     ? images.filter(img => !items.some(it => it.type === 'image' && it.id === img.id)).length
@@ -548,6 +603,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
                   item={item}
                   url={imageUrls[item.name]}
                   isSelected={selected.has(item.id)}
+                  canResize={selected.size <= 1}
                   onMouseDown={startItemMove}
                   onResizeStart={startResize}
                   onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, id: item.id, type: 'image', name: item.name }) }}
@@ -556,6 +612,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
                   key={item.id}
                   item={item}
                   isSelected={selected.has(item.id)}
+                  canResize={selected.size <= 1}
                   isEditing={editingText === item.id}
                   onMouseDown={startItemMove}
                   onResizeStart={startResize}
@@ -564,6 +621,21 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
                   onChange={text => setItems(prev => prev.map(it => it.id === item.id ? { ...it, text } : it))}
                   onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, id: item.id, type: 'text' }) }}
                 />
+            )}
+
+            {/* Group selection frame — shown when 2+ items selected */}
+            {showGroupFrame && groupBounds && (
+              <div style={{
+                position: 'absolute',
+                left: groupBounds.x, top: groupBounds.y,
+                width: groupBounds.w, height: groupBounds.h,
+                border: '1.5px solid var(--accent)',
+                borderRadius: 4,
+                pointerEvents: 'none',
+                boxSizing: 'border-box',
+              }}>
+                <div style={s.groupResizeHandle} onMouseDown={startGroupResize} />
+              </div>
             )}
           </div>
 
@@ -621,8 +693,6 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
                 restore ({deletedCount})
               </button>
             )}
-            <span style={s.hudDot}>·</span>
-            <span style={s.hudHint}>scroll=zoom · middle=pan · drag=select · shift+click=add · del=remove · ctrl+z=undo</span>
           </div>
 
           {images.length === 0 && (
@@ -635,7 +705,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
 }
 
 // ── image item ────────────────────────────────────────────────────────────────
-function ImageItem({ item, url, isSelected, onMouseDown, onResizeStart, onContextMenu }) {
+function ImageItem({ item, url, isSelected, canResize, onMouseDown, onResizeStart, onContextMenu }) {
   return (
     <div
       style={{
@@ -651,7 +721,7 @@ function ImageItem({ item, url, isSelected, onMouseDown, onResizeStart, onContex
         ? <img src={url} alt={item.name} style={s.img} draggable={false} />
         : <div style={s.imgPlaceholder} />
       }
-      {isSelected && (
+      {isSelected && canResize && (
         <div style={s.resizeHandle} onMouseDown={e => onResizeStart(e, item)} />
       )}
     </div>
@@ -659,7 +729,7 @@ function ImageItem({ item, url, isSelected, onMouseDown, onResizeStart, onContex
 }
 
 // ── text item ─────────────────────────────────────────────────────────────────
-function TextItem({ item, isSelected, isEditing, onMouseDown, onResizeStart, onStartEdit, onStopEdit, onChange, onContextMenu }) {
+function TextItem({ item, isSelected, canResize, isEditing, onMouseDown, onResizeStart, onStartEdit, onStopEdit, onChange, onContextMenu }) {
   return (
     <div
       style={{
@@ -693,7 +763,7 @@ function TextItem({ item, isSelected, isEditing, onMouseDown, onResizeStart, onS
             }
           </div>
       }
-      {isSelected && !isEditing && (
+      {isSelected && !isEditing && canResize && (
         <div
           style={{ ...s.resizeHandle, cursor: 'ew-resize', bottom: '50%', transform: 'translateY(50%)' }}
           onMouseDown={e => onResizeStart(e, item)}
@@ -756,6 +826,13 @@ const s = {
     width: 10, height: 10,
     background: 'var(--accent)', borderRadius: 2,
     cursor: 'se-resize', zIndex: 10,
+    boxShadow: '0 0 0 1px rgba(0,0,0,0.5)',
+  },
+  groupResizeHandle: {
+    position: 'absolute', right: -5, bottom: -5,
+    width: 10, height: 10,
+    background: 'var(--accent)', borderRadius: 2,
+    cursor: 'se-resize', pointerEvents: 'all', zIndex: 10,
     boxShadow: '0 0 0 1px rgba(0,0,0,0.5)',
   },
   marquee: {

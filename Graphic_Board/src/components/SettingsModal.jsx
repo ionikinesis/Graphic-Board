@@ -5,7 +5,7 @@ import { PRESET_COLORS } from '../utils/color.js'
 const darkThemes  = Object.entries(themes).filter(([, t]) => t.mode === 'dark')
 const lightThemes = Object.entries(themes).filter(([, t]) => t.mode === 'light')
 
-export default function SettingsModal({ rootName, onChoose, onClear, onClose, scale, onSetScale, currentTheme, onSetTheme, customColors, onSetCustomColors, tagManager }) {
+export default function SettingsModal({ roots, activeRootId, onAddRoot, onRemoveRoot, onSwitchRoot, onClose, scale, onSetScale, currentTheme, onSetTheme, customColors, onSetCustomColors, tagManager }) {
   return (
     <div style={s.backdrop} onClick={onClose}>
       <div style={s.panel} onClick={e => e.stopPropagation()}>
@@ -15,18 +15,42 @@ export default function SettingsModal({ rootName, onChoose, onClear, onClose, sc
         </div>
 
         <div style={s.body}>
-          {/* Library root */}
-          <div style={s.sectionLabel}>library root</div>
-          <div style={s.rootRow}>
-            <span style={s.folderIcon}>⌂</span>
-            <span style={s.rootName}>{rootName ?? '—'}</span>
-          </div>
-          <div style={s.actions}>
-            <button style={s.changeBtn} onClick={onChoose}>change folder</button>
-            {rootName && (
-              <button style={s.clearBtn} onClick={onClear}>clear library</button>
+          {/* Library folders */}
+          <div style={s.sectionLabel}>library folders</div>
+          <div style={s.rootList}>
+            {roots.length === 0 && (
+              <div style={s.rootEmpty}>no folders — add one below</div>
             )}
+            {roots.map(root => {
+              const isActive  = root.id === activeRootId
+              const canSwitch = root.status !== 'missing' && !isActive
+              return (
+                <div
+                  key={root.id}
+                  style={{
+                    ...s.rootRow,
+                    borderColor: isActive ? 'var(--accent)' : 'var(--border-subtle)',
+                    cursor: canSwitch ? 'pointer' : 'default',
+                    opacity: root.status === 'missing' ? 0.45 : 1,
+                  }}
+                  onClick={canSwitch ? () => onSwitchRoot(root.id) : undefined}
+                >
+                  <span style={{ ...s.folderIcon, color: isActive ? 'var(--accent)' : 'var(--text-muted)' }}>⌂</span>
+                  <span style={s.rootName}>{root.name}</span>
+                  {root.status === 'needs-permission' && (
+                    <span style={s.permBadge}>needs access</span>
+                  )}
+                  {isActive && <span style={s.activeDot} />}
+                  <button
+                    style={s.removeRootBtn}
+                    onClick={e => { e.stopPropagation(); onRemoveRoot(root.id) }}
+                    title="remove folder"
+                  >×</button>
+                </div>
+              )
+            })}
           </div>
+          <button style={s.addFolderBtn} onClick={onAddRoot}>+ add folder</button>
 
           <div style={s.rule} />
 
@@ -357,22 +381,22 @@ const s = {
   closeBtn: { fontSize: 12, color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 7px', borderRadius: 3 },
   body:     { padding: 18, display: 'flex', flexDirection: 'column', gap: 11, overflowY: 'auto' },
   sectionLabel: { fontSize: 10, letterSpacing: '0.18em', color: 'var(--border-strong)', textTransform: 'uppercase', fontWeight: 700 },
+  rootList: { display: 'flex', flexDirection: 'column', gap: 5 },
+  rootEmpty: { fontSize: 11, color: 'var(--border-strong)', letterSpacing: '0.04em', fontStyle: 'italic', padding: '4px 2px' },
   rootRow: {
-    display: 'flex', alignItems: 'center', gap: 9, padding: '9px 12px',
-    background: 'var(--bg-raised)', borderRadius: 'var(--radius-sm)', border: '0.5px solid var(--border-subtle)',
+    display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px',
+    background: 'var(--bg-raised)', borderRadius: 'var(--radius-sm)',
+    border: '0.5px solid var(--border-subtle)', transition: 'border-color 0.1s',
   },
-  folderIcon: { fontSize: 15, color: 'var(--accent)', flexShrink: 0 },
-  rootName:   { fontSize: 13, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  actions:    { display: 'flex', gap: 7 },
-  changeBtn: {
+  folderIcon:    { fontSize: 14, flexShrink: 0 },
+  rootName:      { flex: 1, fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', letterSpacing: '0.03em' },
+  permBadge:     { fontSize: 9, color: 'var(--accent)', border: '0.5px solid var(--accent-dim)', borderRadius: 2, padding: '1px 5px', letterSpacing: '0.06em', flexShrink: 0 },
+  activeDot:     { width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 },
+  removeRootBtn: { fontSize: 14, lineHeight: 1, color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '0 2px', flexShrink: 0 },
+  addFolderBtn: {
     fontSize: 12, padding: '7px 14px', borderRadius: 'var(--radius-sm)', border: 'none',
     background: 'var(--accent)', color: 'var(--accent-text)', fontWeight: 700,
-    letterSpacing: '0.04em', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-  },
-  clearBtn: {
-    fontSize: 12, padding: '7px 14px', borderRadius: 'var(--radius-sm)',
-    border: '0.5px solid var(--border-mid)', background: 'transparent',
-    color: 'var(--text-muted)', letterSpacing: '0.04em', cursor: 'pointer', fontFamily: 'var(--font-mono)',
+    letterSpacing: '0.04em', cursor: 'pointer', fontFamily: 'var(--font-mono)', alignSelf: 'flex-start',
   },
   rule:         { height: '0.5px', background: 'var(--border-subtle)', margin: '2px 0' },
   themeColumns: { display: 'flex', gap: 10 },

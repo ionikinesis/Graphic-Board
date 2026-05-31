@@ -1,26 +1,48 @@
 import { useState, useEffect, useCallback } from 'react'
 import { dbGet, dbSet, dbDelete } from '../utils/db.js'
 
+const TAG_COLORS_KEY = 'graphic_board_tag_colors'
+
+function initTagColors() {
+  // Migrate from old key on first access
+  if (!localStorage.getItem(TAG_COLORS_KEY)) {
+    const old = localStorage.getItem('refboard_tag_colors')
+    if (old) localStorage.setItem(TAG_COLORS_KEY, old)
+  }
+  try { return JSON.parse(localStorage.getItem(TAG_COLORS_KEY)) ?? {} } catch { return {} }
+}
+
+function saveTagColors(next) {
+  localStorage.setItem(TAG_COLORS_KEY, JSON.stringify(next))
+}
+
 export function useFolderMeta(config, updateConfig) {
   const [colors,    setColors]    = useState({})
   const [recent,    setRecent]    = useState({})
   const [favs,      setFavs]      = useState(() => new Set())
   const [tags,      setTags]      = useState({})
-  const [tagColors, setTagColors] = useState({})
+  const [tagColors, setTagColors] = useState(initTagColors)
   const [links,      setLinks]      = useState({})
   const [folderOrd,  setFolderOrd]  = useState({})
   const [imageOrd,   setImageOrd]   = useState({})
   const [sortNames,  setSortNames]  = useState({})
   const [folderModes, setFolderModes] = useState({})
 
-  // Hydrate all state from config once loaded
+  // Hydrate state from config once loaded; merge any config tagColors into global store
   useEffect(() => {
     if (!config) return
     setColors(config.folderColors ?? {})
     setRecent(config.recent       ?? {})
     setFavs(new Set(config.folderFavs ?? []))
     setTags(config.itemTags       ?? {})
-    setTagColors(config.tagColors ?? {})
+    // Merge config tagColors into global localStorage store (old configs / other machines)
+    if (config.tagColors && Object.keys(config.tagColors).length > 0) {
+      setTagColors(prev => {
+        const merged = { ...config.tagColors, ...prev } // local takes priority
+        saveTagColors(merged)
+        return merged
+      })
+    }
     setLinks(config.itemLinks     ?? {})
     setFolderOrd(config.folderOrder   ?? {})
     setImageOrd(config.imageOrder     ?? {})
@@ -103,16 +125,16 @@ export function useFolderMeta(config, updateConfig) {
     return counts
   }, [tags])
 
-  // ── tag colors ────────────────────────────────────────────────────────────
+  // ── tag colors (global — stored in localStorage, shared across all roots) ─
   const setTagColor = useCallback((tagName, hex) => {
     setTagColors(prev => {
       const next = { ...prev }
       if (hex) next[tagName] = hex
       else delete next[tagName]
-      updateConfig({ tagColors: next })
+      saveTagColors(next)
       return next
     })
-  }, [updateConfig])
+  }, [])
 
   const getTagColor = useCallback((tagName) => tagColors[tagName] ?? null, [tagColors])
 
@@ -121,10 +143,10 @@ export function useFolderMeta(config, updateConfig) {
     if (!trimmed || !color) return
     setTagColors(prev => {
       const next = { ...prev, [trimmed]: color }
-      updateConfig({ tagColors: next })
+      saveTagColors(next)
       return next
     })
-  }, [updateConfig])
+  }, [])
 
   // ── item links ────────────────────────────────────────────────────────────
   const setItemLink = useCallback((pathKey, linkData) => {
@@ -203,7 +225,7 @@ export function useFolderMeta(config, updateConfig) {
       const next = { ...prev }
       next[trimmed] = next[oldName]
       delete next[oldName]
-      updateConfig({ tagColors: next })
+      saveTagColors(next)
       return next
     })
   }, [updateConfig])
@@ -220,7 +242,7 @@ export function useFolderMeta(config, updateConfig) {
     setTagColors(prev => {
       const next = { ...prev }
       delete next[fromName]
-      updateConfig({ tagColors: next })
+      saveTagColors(next)
       return next
     })
   }, [updateConfig])
@@ -238,7 +260,7 @@ export function useFolderMeta(config, updateConfig) {
     setTagColors(prev => {
       const next = { ...prev }
       delete next[tagName]
-      updateConfig({ tagColors: next })
+      saveTagColors(next)
       return next
     })
   }, [updateConfig])

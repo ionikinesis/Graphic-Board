@@ -32,7 +32,9 @@ export default function BoardView() {
 
   useEffect(() => {
     async function init() {
-      const h = await dbGet('handles', 'root').catch(() => null)
+      const activeId = localStorage.getItem('graphic_board_active_root') ?? localStorage.getItem('refboard_active_root')
+      const idbKey   = activeId ? `root_${activeId}` : null
+      const h        = idbKey ? await dbGet('handles', idbKey).catch(() => null) : null
       if (!h) { setStatus('no-root'); return }
 
       const perm = await h.queryPermission({ mode: 'readwrite' })

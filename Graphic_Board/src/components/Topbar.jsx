@@ -4,7 +4,7 @@ export default function Topbar({ onOpenSettings, onNavigateHome, loading }) {
   return (
     <header style={s.topbar}>
       <div style={s.logoWrap} onClick={onNavigateHome} title="home">
-        <img src="/images/logo.png" alt="refboard" style={s.logoImg} />
+        <img src="/images/logo.png" alt="Graphic Board" style={s.logoImg} />
         <span style={s.byline}>by Riku Yuki Darroch</span>
       </div>
       <div style={s.right}>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 
 async function loadSubdirs(handle) {
   const dirs = []
@@ -9,73 +9,136 @@ async function loadSubdirs(handle) {
   return dirs
 }
 
-export default function Sidebar({ rootHandle, stack, onNavigateTo, onNavigateHome }) {
-  const [rootDirs, setRootDirs] = useState([])
-
-  useEffect(() => {
-    if (!rootHandle) { setRootDirs([]); return }
-    loadSubdirs(rootHandle).then(setRootDirs)
-  }, [rootHandle])
-
-  const isAtRoot = stack.length === 0
-
+export default function Sidebar({ rootHandle, stack, onNavigateTo, onNavigateHome, roots, activeRootId, onSwitchRoot, onSetRootColor }) {
   return (
     <aside style={s.sidebar}>
       <div style={s.scroll}>
-        {rootHandle && (
-          <>
-            <div style={s.label}>library</div>
-            {/* Root folder entry */}
-            <div
-              style={{
-                ...s.row,
-                paddingLeft: 14,
-                borderLeft: isAtRoot ? '2px solid var(--accent)' : '2px solid transparent',
-                background: isAtRoot ? 'var(--accent-faint)' : 'transparent',
-              }}
-              onClick={onNavigateHome}
-              onMouseEnter={e => { if (!isAtRoot) e.currentTarget.style.background = '#0f0f0f' }}
-              onMouseLeave={e => { e.currentTarget.style.background = isAtRoot ? 'var(--accent-faint)' : 'transparent' }}
-            >
-              <span style={s.rootIcon}>⌂</span>
-              <span style={{
-                ...s.nodeName,
-                fontWeight: isAtRoot ? 700 : 400,
-                color: isAtRoot ? 'var(--text-primary)' : 'var(--text-muted)',
-              }}>
-                {rootHandle.name}
-              </span>
-              <span style={s.rootBadge}>root</span>
-            </div>
-
-            {rootDirs.map(dir => (
-              <SidebarNode
-                key={dir.name}
-                name={dir.name}
-                handle={dir.handle}
-                path={[{ name: dir.name, handle: dir.handle }]}
-                stack={stack}
-                onNavigateTo={onNavigateTo}
-                baseDepth={1}
-              />
-            ))}
-          </>
-        )}
-
+        {roots && roots.map(root => (
+          <RootTree
+            key={root.id}
+            root={root}
+            isActive={root.id === activeRootId}
+            stack={root.id === activeRootId ? stack : []}
+            onNavigateTo={root.id === activeRootId ? onNavigateTo : () => onSwitchRoot(root.id)}
+            onNavigateHome={root.id === activeRootId ? onNavigateHome : () => onSwitchRoot(root.id)}
+            onSetColor={onSetRootColor ? hex => onSetRootColor(root.id, hex) : null}
+          />
+        ))}
       </div>
     </aside>
   )
 }
 
-// Recursive tree node — manages its own expand/collapse and lazy child loading
+function RootTree({ root, isActive, stack, onNavigateTo, onNavigateHome, onSetColor }) {
+  const [expanded, setExpanded]   = useState(isActive)
+  const [children, setChildren]   = useState(null)
+  const [hovered,  setHovered]    = useState(false)
+  const colorRef = useRef()
+
+  // Auto-expand when this root becomes active
+  useEffect(() => { if (isActive) setExpanded(true) }, [isActive])
+
+  // Lazy-load subdirs when first expanded
+  useEffect(() => {
+    if (!expanded || children !== null || !root.handle) return
+    loadSubdirs(root.handle).then(setChildren)
+  }, [expanded, root.handle, children])
+
+  const hasHandle  = root.handle && root.status !== 'missing'
+  const isAtRoot   = isActive && stack.length === 0
+  const borderColor = isAtRoot ? 'var(--accent)' : (root.color ?? 'transparent')
+
+  return (
+    <div style={{ opacity: root.status === 'missing' ? 0.4 : 1 }}>
+      <div
+        style={{
+          ...s.row,
+          paddingLeft: 6,
+          borderLeft: `2px solid ${borderColor}`,
+          background: isAtRoot ? 'var(--accent-faint)' : 'transparent',
+        }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        {/* Expand / collapse */}
+        <span
+          style={{
+            ...s.chevron,
+            opacity: hasHandle ? 1 : 0.25,
+            pointerEvents: hasHandle ? 'auto' : 'none',
+            transform: expanded ? 'rotate(90deg)' : 'none',
+          }}
+          onClick={() => hasHandle && setExpanded(e => !e)}
+        >›</span>
+
+        {/* Color dot — left-click opens picker, right-click clears color */}
+        {onSetColor && (
+          <label
+            style={s.colorLabel}
+            title="left-click to set color · right-click to clear"
+            onContextMenu={e => { e.preventDefault(); onSetColor(null) }}
+          >
+            <input
+              ref={colorRef}
+              type="color"
+              value={root.color || '#888888'}
+              style={{ position: 'absolute', opacity: 0, width: 0, height: 0, pointerEvents: 'none' }}
+              onChange={e => onSetColor(e.target.value)}
+            />
+            <span style={{
+              ...s.colorDot,
+              background: root.color ?? 'var(--border-mid)',
+              opacity: root.color ? 1 : (hovered ? 0.55 : 0.2),
+              outline: root.color && isActive ? `2px solid ${root.color}44` : 'none',
+              outlineOffset: 1,
+            }} />
+          </label>
+        )}
+
+        {/* ⌂ icon */}
+        <span style={{ ...s.homeIcon, color: isActive ? 'var(--accent)' : 'var(--text-muted)' }}>⌂</span>
+
+        {/* Root name */}
+        <span
+          style={{
+            ...s.nodeName,
+            fontWeight: isActive ? 700 : 400,
+            color: isActive ? 'var(--text-primary)' : 'var(--text-muted)',
+            cursor: 'pointer',
+          }}
+          onClick={onNavigateHome}
+        >
+          {root.name}
+        </span>
+
+        {root.status === 'needs-permission' && (
+          <span style={s.permDot} title="needs access" />
+        )}
+      </div>
+
+      {/* Subdirectory tree */}
+      {expanded && children && children.map(dir => (
+        <SidebarNode
+          key={dir.name}
+          name={dir.name}
+          handle={dir.handle}
+          path={[{ name: dir.name, handle: dir.handle }]}
+          stack={stack}
+          onNavigateTo={onNavigateTo}
+          baseDepth={1}
+        />
+      ))}
+    </div>
+  )
+}
+
 function SidebarNode({ name, handle, path, stack, onNavigateTo, baseDepth = 0 }) {
   const [expanded, setExpanded] = useState(false)
-  const [children, setChildren] = useState(null) // null = not yet loaded
-  const [hasSubdirs, setHasSubdirs] = useState(true) // optimistic until first load
+  const [children, setChildren] = useState(null)
+  const [hasSubdirs, setHasSubdirs] = useState(true)
 
   const depth = path.length - 1 + baseDepth
 
-  // A node is "in path" if its path is a prefix of the current stack
   const isInPath = path.length <= stack.length &&
     path.every((p, i) => stack[i]?.name === p.name)
   const isActiveLeaf = isInPath && path.length === stack.length
@@ -107,11 +170,7 @@ function SidebarNode({ name, handle, path, stack, onNavigateTo, baseDepth = 0 })
           ...s.row,
           paddingLeft: 14 + depth * 12,
           borderLeft: isActiveLeaf ? '2px solid var(--accent)' : '2px solid transparent',
-          background: isActiveLeaf
-            ? 'var(--accent-faint)'
-            : isInPath
-            ? '#0d0d0d'
-            : 'transparent',
+          background: isActiveLeaf ? 'var(--accent-faint)' : isInPath ? '#0d0d0d' : 'transparent',
         }}
         onMouseEnter={e => { if (!isActiveLeaf) e.currentTarget.style.background = '#0f0f0f' }}
         onMouseLeave={e => {
@@ -135,9 +194,7 @@ function SidebarNode({ name, handle, path, stack, onNavigateTo, baseDepth = 0 })
             fontWeight: isActiveLeaf ? 700 : 400,
             color: isActiveLeaf
               ? 'var(--text-primary)'
-              : isInPath
-              ? 'var(--text-secondary)'
-              : 'var(--text-muted)',
+              : isInPath ? 'var(--text-secondary)' : 'var(--text-muted)',
           }}
           onClick={handleSelect}
         >
@@ -175,14 +232,6 @@ const s = {
     overflowY: 'auto',
     padding: '10px 0',
   },
-  label: {
-    fontSize: 10,
-    letterSpacing: '0.18em',
-    color: 'var(--border-strong)',
-    padding: '0 14px 7px',
-    textTransform: 'uppercase',
-    fontWeight: 700,
-  },
   row: {
     display: 'flex',
     alignItems: 'center',
@@ -190,7 +239,6 @@ const s = {
     paddingRight: 10,
     paddingTop: 5,
     paddingBottom: 5,
-    cursor: 'pointer',
     transition: 'background 0.08s',
   },
   chevron: {
@@ -203,6 +251,28 @@ const s = {
     cursor: 'pointer',
     userSelect: 'none',
   },
+  colorLabel: {
+    cursor: 'pointer',
+    flexShrink: 0,
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  colorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: '50%',
+    display: 'block',
+    transition: 'opacity 0.15s',
+    flexShrink: 0,
+  },
+  homeIcon: {
+    fontSize: 11,
+    width: 14,
+    textAlign: 'center',
+    flexShrink: 0,
+    userSelect: 'none',
+  },
   nodeName: {
     flex: 1,
     fontSize: 12,
@@ -211,11 +281,13 @@ const s = {
     textOverflow: 'ellipsis',
     minWidth: 0,
     transition: 'color 0.1s',
+    userSelect: 'none',
   },
-  rootIcon: { fontSize: 13, color: 'var(--accent)', width: 16, textAlign: 'center', flexShrink: 0 },
-  rootBadge: {
-    fontSize: 8, color: 'var(--accent)', letterSpacing: '0.08em', textTransform: 'uppercase',
-    border: '0.5px solid var(--accent)', borderRadius: 2, padding: '1px 4px', flexShrink: 0,
-    opacity: 0.7,
+  permDot: {
+    width: 5,
+    height: 5,
+    borderRadius: '50%',
+    background: '#e08050',
+    flexShrink: 0,
   },
 }

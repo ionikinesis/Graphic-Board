@@ -1,8 +1,8 @@
-// Shared IndexedDB for refboard
+// Shared IndexedDB for Graphic Board
 // v1: 'handles' store (root directory handle)
 // v2: 'custom_thumbs' store (custom thumbnail FileSystemFileHandles keyed by path)
 
-const DB_NAME = 'refboard'
+const DB_NAME = 'refboard'  // keep stable — renaming would wipe stored handles
 const DB_VERSION = 2
 
 let _db = null

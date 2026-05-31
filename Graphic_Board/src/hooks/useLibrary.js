@@ -2,8 +2,8 @@
 // Manages all file system state: collections, favourites, navigation
 import { useState, useCallback } from 'react';
 
-const FAVS_KEY = 'refboard_favourites';
-const COLLECTIONS_KEY = 'refboard_collections';
+const FAVS_KEY = 'graphic_board_favourites';
+const COLLECTIONS_KEY = 'graphic_board_collections';
 
 function loadFavourites() {
   try {

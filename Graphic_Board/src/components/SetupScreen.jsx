@@ -6,7 +6,7 @@ export default function SetupScreen({ status, rootName, onChoose, onGrant }) {
   return (
     <div style={s.wrap}>
       <div style={s.inner}>
-        <img src="/images/logo.png" alt="refboard" style={s.logo} />
+        <img src="/images/logo.png" alt="Graphic Board" style={s.logo} />
 
         {needsPermission ? (
           <>
@@ -26,16 +26,9 @@ export default function SetupScreen({ status, rootName, onChoose, onGrant }) {
           </>
         ) : (
           <>
-            <p style={s.sub}>a reference image manager for digital artists</p>
-            <div style={s.divider} />
-            <p style={s.body}>
-              choose your library folder to get started.<br />
-              subfolders become collections — no copying or uploading.
-            </p>
             <button style={s.primaryBtn} onClick={onChoose}>
               browse for folder
             </button>
-            <p style={s.hint}>works with chrome and edge · uses the file system access api · nothing is uploaded</p>
           </>
         )}
       </div>

@@ -14,7 +14,11 @@ import { useAppSettings } from './hooks/useAppSettings.js'
 import { useConfigFile } from './hooks/useConfigFile.js'
 
 export default function App() {
-  const { rootHandle, rootName, status: rootStatus, chooseRoot, grantPermission, clearRoot } = useRootDirectory()
+  const {
+    rootHandle, rootName, status: rootStatus,
+    chooseRoot, grantPermission,
+    roots, activeRootId, addRoot, removeRoot, switchRoot, setRootColor,
+  } = useRootDirectory()
   const {
     stack, folders, hasImages, loading, breadcrumb, currentHandle,
     canGoBack, canGoForward, navigateInto, navigateToPath, goBack, goForward,
@@ -23,21 +27,13 @@ export default function App() {
   const { config, configReady, updateConfig } = useConfigFile(rootHandle)
   const { favourites, toggle: toggleFav, isFavourited } = useFavourites(config, updateConfig)
   const folderMeta = useFolderMeta(config, updateConfig)
-  const { settings, update: updateSettings, customColors, updateCustomColors } = useAppSettings(config, updateConfig)
+  const { settings, update: updateSettings, customColors, updateCustomColors } = useAppSettings()
 
-  const [iconSize,     setIconSize]     = useState('medium')
-  const [sortBy,       setSortBy]       = useState('alpha')
-  const [groupBy,      setGroupBy]      = useState('none')
   const [settingsOpen, setSettingsOpen] = useState(false)
 
-  // Sync view settings from config on initial load
-  useEffect(() => {
-    if (!config?.viewSettings) return
-    const vs = config.viewSettings
-    if (vs.iconSize) setIconSize(vs.iconSize)
-    if (vs.sortBy)   setSortBy(vs.sortBy)
-    if (vs.groupBy)  setGroupBy(vs.groupBy)
-  }, [configReady]) // only run once when config first becomes ready
+  const iconSize = settings.iconSize ?? 'medium'
+  const sortBy   = settings.sortBy   ?? 'alpha'
+  const groupBy  = settings.groupBy  ?? 'none'
 
   // Mouse back/forward buttons (button 3 = back, button 4 = forward)
   useEffect(() => {
@@ -49,12 +45,9 @@ export default function App() {
     return () => window.removeEventListener('mouseup', onMouseUp)
   }, [goBack, goForward])
 
-  async function handleChooseRoot() { setSettingsOpen(false); await chooseRoot() }
-  async function handleClearRoot()  { setSettingsOpen(false); await clearRoot()  }
-
-  function handleSetSortBy(val)   { setSortBy(val);   updateConfig({ viewSettings: { sortBy: val,  groupBy, iconSize } }) }
-  function handleSetGroupBy(val)  { setGroupBy(val);  updateConfig({ viewSettings: { sortBy, groupBy: val,  iconSize } }) }
-  function handleSetIconSize(val) { setIconSize(val); updateConfig({ viewSettings: { sortBy, groupBy, iconSize: val  } }) }
+  function handleSetSortBy(val)   { updateSettings({ sortBy: val }) }
+  function handleSetGroupBy(val)  { updateSettings({ groupBy: val }) }
+  function handleSetIconSize(val) { updateSettings({ iconSize: val }) }
 
   // Record recently-opened when navigating into a folder
   function handleNavigateInto(folder) {
@@ -115,6 +108,10 @@ export default function App() {
           stack={stack}
           onNavigateTo={navigateToPath}
           onNavigateHome={() => navigateToPath([])}
+          roots={roots}
+          activeRootId={activeRootId}
+          onSwitchRoot={id => { switchRoot(id); navigateToPath([]) }}
+          onSetRootColor={setRootColor}
         />
 
         <div style={styles.main}>
@@ -194,9 +191,11 @@ export default function App() {
 
       {settingsOpen && (
         <SettingsModal
-          rootName={rootName}
-          onChoose={handleChooseRoot}
-          onClear={handleClearRoot}
+          roots={roots}
+          activeRootId={activeRootId}
+          onAddRoot={async () => { await addRoot() }}
+          onRemoveRoot={removeRoot}
+          onSwitchRoot={id => { switchRoot(id); setSettingsOpen(false) }}
           onClose={() => setSettingsOpen(false)}
           scale={settings.scale}
           onSetScale={scale => updateSettings({ scale })}
