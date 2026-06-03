@@ -2,9 +2,22 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 :root {
+  --text-scale: 1;
+  --fs-8:  calc(8px  * var(--text-scale));
+  --fs-9:  calc(9px  * var(--text-scale));
+  --fs-10: calc(10px * var(--text-scale));
+  --fs-11: calc(11px * var(--text-scale));
+  --fs-12: calc(12px * var(--text-scale));
+  --fs-13: calc(13px * var(--text-scale));
+  --fs-14: calc(14px * var(--text-scale));
+  --fs-15: calc(15px * var(--text-scale));
+  --fs-16: calc(16px * var(--text-scale));
+
   --bg-base:       #090909;
   --bg-deep:       #040404;
   --bg-surface:    #101010;
@@ -40,6 +53,7 @@ body {
 }
 
 button, input, select { font-family: var(--font-mono); cursor: pointer; }
+input, textarea { user-select: text; -webkit-user-select: text; }
 
 ::-webkit-scrollbar { width: 3px; height: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }

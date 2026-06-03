@@ -1,11 +1,17 @@
 const IMAGE_RE = /\.(jpe?g|png|gif|webp|avif|bmp|tiff?|svg)$/i
+const VIDEO_RE = /\.(mp4|webm|mov|m4v|ogg|ogv|avi|mkv)$/i
+
+function isMediaFile(file) {
+  return file.type.startsWith('image/') || file.type.startsWith('video/')
+    || IMAGE_RE.test(file.name) || VIDEO_RE.test(file.name)
+}
 
 // Write File objects into a directory handle, auto-renaming on conflicts.
 // Returns [{ name, handle }] for each successfully written file.
 export async function writeFilesToDir(dirHandle, files) {
   const results = []
   for (const file of files) {
-    if (!file.type.startsWith('image/') && !IMAGE_RE.test(file.name)) continue
+    if (!isMediaFile(file)) continue
     try {
       const name = await uniqueName(dirHandle, file.name || `pasted-${Date.now()}.png`)
       const fh       = await dirHandle.getFileHandle(name, { create: true })
@@ -26,18 +32,18 @@ export function getImageFiles(e) {
   if (!dt) return []
 
   // File list (drag from OS, or image file copied in explorer)
-  const fromFiles = [...(dt.files ?? [])].filter(
-    f => f.type.startsWith('image/') || IMAGE_RE.test(f.name)
-  )
+  const fromFiles = [...(dt.files ?? [])].filter(isMediaFile)
   if (fromFiles.length > 0) return fromFiles
 
-  // Items fallback: raw image data (e.g. screenshot in clipboard)
+  // Items fallback: raw image/video data (e.g. screenshot in clipboard)
   const fromItems = []
   for (const item of dt.items ?? []) {
-    if (item.type.startsWith('image/')) {
+    if (item.type.startsWith('image/') || item.type.startsWith('video/')) {
       const blob = item.getAsFile()
       if (blob) {
-        const ext = item.type.split('/')[1]?.replace('jpeg', 'jpg') ?? 'png'
+        const mainType = item.type.split('/')[0] // 'image' or 'video'
+        const subType  = item.type.split('/')[1]?.replace('jpeg', 'jpg') ?? 'bin'
+        const ext = mainType === 'video' ? subType : subType
         fromItems.push(new File([blob], `pasted-${Date.now()}.${ext}`, { type: item.type }))
       }
     }

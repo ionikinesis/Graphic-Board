@@ -9,12 +9,14 @@ export async function readBoardFile(rootHandle) {
     return parsed && typeof parsed === 'object' ? parsed : { boards: {} }
   } catch {}
 
-  // Fall back to old filename
+  // Fall back to old filename and migrate on write
   try {
     const fh   = await rootHandle.getFileHandle(FILE_NAME_OLD)
     const file = await fh.getFile()
     const parsed = JSON.parse(await file.text())
-    return parsed && typeof parsed === 'object' ? parsed : { boards: {} }
+    const data = parsed && typeof parsed === 'object' ? parsed : { boards: {} }
+    writeBoardFile(rootHandle, data)
+    return data
   } catch {}
 
   return { boards: {} }

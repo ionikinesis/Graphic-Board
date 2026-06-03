@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { dbGet } from './utils/db.js'
-import { readConfig } from './utils/configFile.js'
 import { readBoardFile, writeBoardFile } from './utils/boardFile.js'
 import { themes, DEFAULT_THEME, generateCustomTheme } from './utils/themes.js'
 import InfiniteCanvas from './components/InfiniteCanvas.jsx'
 
 const IMAGE_RE = /\.(jpe?g|png|gif|webp|avif|bmp|tiff?|svg)$/i
+const VIDEO_RE = /\.(mp4|webm|mov|m4v|ogg|ogv|avi|mkv)$/i
 const params    = new URLSearchParams(window.location.search)
 const FOLDER_PATH = decodeURIComponent(params.get('path') || '')
 
@@ -32,7 +32,7 @@ export default function BoardView() {
 
   useEffect(() => {
     async function init() {
-      const activeId = localStorage.getItem('graphic_board_active_root') ?? localStorage.getItem('refboard_active_root')
+      const activeId = localStorage.getItem('graphic_board_active_root')
       const idbKey   = activeId ? `root_${activeId}` : null
       const h        = idbKey ? await dbGet('handles', idbKey).catch(() => null) : null
       if (!h) { setStatus('no-root'); return }
@@ -56,9 +56,14 @@ export default function BoardView() {
   }
 
   async function setup(h) {
-    // Apply saved theme so the board matches the main window
-    const config = await readConfig(h).catch(() => null)
-    if (config?.settings?.theme) applyTheme(config.settings.theme, config.customColors)
+    // Apply theme from localStorage — same source as the main window (useAppSettings)
+    try {
+      const settings     = JSON.parse(localStorage.getItem('graphic_board_settings')     || '{}')
+      const customColors = JSON.parse(localStorage.getItem('graphic_board_custom_colors') || '{}')
+      applyTheme(settings.theme || DEFAULT_THEME, customColors)
+    } catch {
+      applyTheme(DEFAULT_THEME, {})
+    }
 
     // Resolve folder handle by walking the path
     const parts = FOLDER_PATH.split('/').filter(Boolean)
@@ -68,11 +73,13 @@ export default function BoardView() {
       if (!dir) { setStatus('not-found'); return }
     }
 
-    // Load image handles
+    // Load image and video handles
     const imgs = []
     for await (const [name, fh] of dir.entries()) {
       if (fh.kind === 'file' && IMAGE_RE.test(name)) {
-        imgs.push({ id: name, name, handle: fh })
+        imgs.push({ id: name, name, handle: fh, mediaType: 'image' })
+      } else if (fh.kind === 'file' && VIDEO_RE.test(name)) {
+        imgs.push({ id: name, name, handle: fh, mediaType: 'video' })
       }
     }
     imgs.sort((a, b) => a.name.localeCompare(b.name))

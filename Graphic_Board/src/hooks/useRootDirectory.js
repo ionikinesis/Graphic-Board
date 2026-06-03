@@ -25,7 +25,7 @@ function saveMeta(list) {
 
 export function useRootDirectory() {
   const [roots,        setRoots]        = useState([])
-  // each root: { id, name, handle, status: 'ready'|'needs-permission'|'missing' }
+  // each root: { id, name, absPath, handle, status: 'ready'|'needs-permission'|'missing' }
   const [activeRootId, setActiveRootId] = useState(null)
   const [booting,      setBooting]      = useState(true)
 
@@ -52,14 +52,14 @@ export function useRootDirectory() {
       }
 
       const savedActive = localStorage.getItem(ACTIVE_KEY)
-      const loaded = await Promise.all(meta.map(async ({ id, name, color }) => {
+      const loaded = await Promise.all(meta.map(async ({ id, name, color, absPath }) => {
         try {
           const handle = await dbGet(STORE, `root_${id}`)
-          if (!handle) return { id, name, color, handle: null, status: 'missing' }
+          if (!handle) return { id, name, color, absPath: absPath ?? null, handle: null, status: 'missing' }
           const perm = await handle.queryPermission({ mode: 'readwrite' })
-          return { id, name, color, handle, status: perm === 'granted' ? 'ready' : 'needs-permission' }
+          return { id, name, color, absPath: absPath ?? null, handle, status: perm === 'granted' ? 'ready' : 'needs-permission' }
         } catch {
-          return { id, name, color, handle: null, status: 'missing' }
+          return { id, name, color, absPath: absPath ?? null, handle: null, status: 'missing' }
         }
       }))
 
@@ -80,15 +80,27 @@ export function useRootDirectory() {
 
   async function addRoot() {
     if (!window.showDirectoryPicker) return false
+
+    // In Tauri: capture the absolute path via the native dialog first.
+    // This is a two-dialog flow until the app is fully ported to Tauri FS.
+    let absPath = null
+    if (window.__TAURI__) {
+      try {
+        const p = await window.__TAURI__.dialog?.open?.({ directory: true, multiple: false })
+        if (typeof p === 'string') absPath = p
+        else return false // user cancelled Tauri dialog
+      } catch {}
+    }
+
     try {
       const handle = await window.showDirectoryPicker({ mode: 'readwrite' })
       const id     = Date.now().toString()
       const name   = handle.name
       await dbSet(STORE, `root_${id}`, handle)
       const meta = loadMeta()
-      meta.push({ id, name })
+      meta.push({ id, name, ...(absPath && { absPath }) })
       saveMeta(meta)
-      const newRoot = { id, name, handle, status: 'ready' }
+      const newRoot = { id, name, absPath, handle, status: 'ready' }
       setRoots(prev => [...prev, newRoot])
       setActiveRootId(id)
       localStorage.setItem(ACTIVE_KEY, id)
@@ -97,6 +109,13 @@ export function useRootDirectory() {
       if (err.name !== 'AbortError') throw err
       return false
     }
+  }
+
+  function setRootAbsPath(id, path) {
+    const trimmed = path?.trim() || null
+    const meta = loadMeta().map(m => m.id === id ? { ...m, ...(trimmed ? { absPath: trimmed } : { absPath: undefined }) } : m)
+    saveMeta(meta)
+    setRoots(prev => prev.map(r => r.id === id ? { ...r, absPath: trimmed } : r))
   }
 
   function switchRoot(id) {
@@ -158,6 +177,7 @@ export function useRootDirectory() {
     // Legacy single-root API (backwards compat — used by App, SetupScreen)
     rootHandle,
     rootName,
+    rootAbsPath: activeRoot?.absPath ?? null,
     status,
     chooseRoot:      addRoot,
     grantPermission,
@@ -169,5 +189,6 @@ export function useRootDirectory() {
     removeRoot,
     switchRoot,
     setRootColor,
+    setRootAbsPath,
   }
 }

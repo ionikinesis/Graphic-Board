@@ -16,13 +16,14 @@ Meant to be a better version of Windows File Explorer for browsing reference ima
 - File System Access API — reads folders directly from disk
 - IndexedDB (`utils/db.js`) — stores the root directory handle and custom thumbnails
 - `refboard.json` in the root folder — primary persistence for all preferences (replaces localStorage as source of truth)
-- localStorage — cache only (for instant first-paint before the JSON file loads)
+- localStorage — cache only (for instant first-paint before the JSON file loads) + root folder metadata (absPath, name, id per root)
 - No router library — navigation state is all in `App.jsx` + `useNavigator`
 
 ## File structure
 
 ```
 Graphic_Board/
+  vite.config.js               ← has openExplorerPlugin (dev server endpoint for Show in Explorer)
   src/
     App.jsx                  ← all top-level state + layout shell
     main.jsx
@@ -34,15 +35,15 @@ Graphic_Board/
       FolderGrid.jsx         ← card grid of subfolders (with thumbnails, colours, tags, drag-to-reorder)
       ImageGrid.jsx          ← image thumbnails + lightbox
       SetupScreen.jsx        ← shown when no root is chosen or permission is needed
-      SettingsModal.jsx      ← theme, scale, custom theme, root folder, tag manager
+      SettingsModal.jsx      ← theme, scale, custom theme, root folder + path, tag manager
       EmptyState.jsx
       ContextMenu.jsx        ← right-click menu (colour, tags, link, sort name, rename)
     hooks/
       useNavigator.js        ← core navigation: stack, forward-stack, scanDir, breadcrumb
-      useRootDirectory.js    ← IDB persistence of the root FileSystemDirectoryHandle
+      useRootDirectory.js    ← IDB persistence of root handles; per-root absPath in localStorage meta
       useFolderMeta.js       ← folder colours, recents, folder-favs, custom thumbs, tags, links, order
       useFavourites.js       ← image-level favourites, backed by config file
-      useAppSettings.js      ← theme + UI scale + custom colours, backed by config file
+      useAppSettings.js      ← theme + UI scale + custom colours (NOT rootAbsPath — that's in useRootDirectory)
       useConfigFile.js       ← reads/writes refboard.json; all other hooks receive config+updateConfig
       useFileSystem.js       ← legacy hook (predates useNavigator, kept for reference)
       useLibrary.js          ← (exists, purpose TBD)
@@ -52,6 +53,9 @@ Graphic_Board/
       color.js               ← colour utilities + PRESET_COLORS
       thumbnail.js           ← thumbnail helpers
       configFile.js          ← read/write refboard.json, migrateFromLocalStorage()
+      platform.js            ← openInExplorer(fullPath): Tauri-aware, falls back to Vite dev endpoint
+      fileOps.js             ← copyFile, moveFile, copyFolder, moveFolder (File System Access API)
+      dragState.js           ← module-level drag payload store (FileSystemHandles can't go in DataTransfer)
 ```
 
 ## Navigation model
@@ -79,6 +83,7 @@ All preferences are stored in `refboard.json` in the user's chosen root folder. 
 | Data | Storage |
 |------|---------|
 | Root directory handle | IndexedDB `handles` store (via `useRootDirectory`) |
+| Root folder absolute OS path | localStorage root meta (`absPath` field per root, via `useRootDirectory`) |
 | Custom folder thumbnails | IndexedDB `custom_thumbs` store (binary — cannot go in JSON) |
 | App settings (theme, scale) | `refboard.json` → `settings` key |
 | Custom theme colours | `refboard.json` → `customColors` key |
@@ -93,6 +98,28 @@ All preferences are stored in `refboard.json` in the user's chosen root folder. 
 | Sort name aliases | `refboard.json` → `sortNames` key |
 
 localStorage is a write-through cache only (prevents theme flash on load). The JSON file is authoritative.
+
+## Root folder absolute path (`rootAbsPath`)
+
+The browser File System Access API deliberately hides the OS file path — `FileSystemDirectoryHandle` only exposes `name` (the folder name), not `C:\...`. To support "Show in Explorer", each root stores an `absPath` in its localStorage meta entry.
+
+- `useRootDirectory` returns `rootAbsPath` (from the active root) and `setRootAbsPath(id, path)`
+- In **Tauri**: `addRoot()` automatically calls `window.__TAURI__.dialog.open({ directory: true })` first to capture the path, then calls `showDirectoryPicker()` for the handle. This is a two-dialog flow — a known limitation until the app is fully ported to Tauri's FS API.
+- In **browser dev mode**: user enters the path manually via the small input field shown under the active root row in Settings modal.
+- `rootAbsPath` is NOT in `useAppSettings` — do not put it there.
+
+## "Show in Explorer" feature
+
+Right-click a folder → "show in explorer" opens that folder in Windows Explorer.
+
+Implementation is in `utils/platform.js` → `openInExplorer(fullPath)`:
+- **Tauri v2**: `window.__TAURI__.core.invoke('plugin:opener|open_path', { path })` (requires `tauri-plugin-opener` in `src-tauri`)
+- **Tauri v1**: `window.__TAURI__.shell.open(path)` (requires shell permission in `tauri.conf.json`)
+- **Browser dev mode**: `fetch('/api/open-explorer?path=...')` → Vite server plugin calls `spawn('explorer.exe', [path])`
+
+The Vite plugin is in `vite.config.js` (`openExplorerPlugin`). It only runs in dev server mode.
+
+The button is disabled (greyed out, badge "set path in settings") when `rootAbsPath` is null.
 
 ## Theming
 
@@ -115,7 +142,8 @@ localStorage is a write-through cache only (prevents theme flash on load). The J
 - Custom drag-to-reorder for both folders and images (only active when sort = custom)
 - Sort name aliases (rename a folder for sort purposes without renaming on disk)
 - Icon size selector (small / medium / large)
-- Right-click context menu with: colour picker, tag editor, link editor, sort name, thumbnail controls, copy path
+- Right-click context menu with: colour picker, tag editor, link editor, sort name, thumbnail controls, show in explorer
+- "Show in explorer" — opens folder in Windows Explorer; uses Tauri native API when packaged, Vite dev endpoint otherwise
 - Links per folder/image (URL + title, opens in new tab; shows favicon)
 - 8 themes switchable at runtime + fully custom theme (bg/accent/text)
 - UI zoom/scale setting
@@ -127,7 +155,7 @@ localStorage is a write-through cache only (prevents theme flash on load). The J
 - **Infinite canvas board** — opens in a new window when a folder's images are viewed; images freely positioned and resized on the canvas; positions/sizes persisted locally (like PureRef). This is the main remaining feature.
 - **Search** — by filename across all images in the current root
 - **Settings portability** — manual export/import of `refboard.json` (automatic via cloud sync already works)
-- **Packaging** — wrap in Electron or Tauri so it installs like a normal desktop app (stretch goal)
+- **Tauri packaging** — wrapping in Tauri for a proper desktop app. `src-tauri` does NOT exist yet. When setting up Tauri, the key integrations needed are: `plugin-opener` (for Show in Explorer), `plugin-dialog` (for folder picking that returns real paths), and eventually `plugin-fs` to replace the browser File System Access API entirely (which would collapse the two-dialog `addRoot()` flow to one dialog and make `rootAbsPath` automatic).
 
 ## Key constraints / things to know
 

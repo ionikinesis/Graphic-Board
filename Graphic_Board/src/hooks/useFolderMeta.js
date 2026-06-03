@@ -208,6 +208,44 @@ export function useFolderMeta(config, updateConfig) {
     })
   }, [updateConfig])
 
+  // ── rename folder path (migrates all metadata keys) ─────────────────────
+  const renameFolderPath = useCallback((oldPathKey, newPathKey, parentPath, oldName, newName) => {
+    function remap(obj) {
+      const next = {}
+      Object.entries(obj).forEach(([k, v]) => {
+        if (k === oldPathKey) next[newPathKey] = v
+        else if (k.startsWith(oldPathKey + '/')) next[newPathKey + k.slice(oldPathKey.length)] = v
+        else next[k] = v
+      })
+      return next
+    }
+    setColors(prev => { const n = remap(prev); updateConfig({ folderColors: n }); return n })
+    setRecent(prev => { const n = remap(prev); updateConfig({ recent: n }); return n })
+    setFavs(prev => {
+      const n = new Set()
+      prev.forEach(k => {
+        if (k === oldPathKey) n.add(newPathKey)
+        else if (k.startsWith(oldPathKey + '/')) n.add(newPathKey + k.slice(oldPathKey.length))
+        else n.add(k)
+      })
+      updateConfig({ folderFavs: [...n] })
+      return n
+    })
+    setTags(prev => { const n = remap(prev); updateConfig({ itemTags: n }); return n })
+    setLinks(prev => { const n = remap(prev); updateConfig({ itemLinks: n }); return n })
+    setSortNames(prev => { const n = remap(prev); updateConfig({ sortNames: n }); return n })
+    setFolderOrd(prev => {
+      const n = remap(prev)
+      if (parentPath !== undefined && n[parentPath]) {
+        n[parentPath] = n[parentPath].map(name => name === oldName ? newName : name)
+      }
+      updateConfig({ folderOrder: n })
+      return n
+    })
+    setImageOrd(prev => { const n = remap(prev); updateConfig({ imageOrder: n }); return n })
+    setFolderModes(prev => { const n = remap(prev); updateConfig({ folderModes: n }); return n })
+  }, [updateConfig])
+
   // ── tag operations ────────────────────────────────────────────────────────
   const renameTag = useCallback((oldName, newName) => {
     const trimmed = newName.trim().toLowerCase()
@@ -278,5 +316,6 @@ export function useFolderMeta(config, updateConfig) {
     setImageOrder, getImageOrder,
     getSortName, setSortName,
     getFolderMode, setFolderMode,
+    renameFolderPath,
   }
 }

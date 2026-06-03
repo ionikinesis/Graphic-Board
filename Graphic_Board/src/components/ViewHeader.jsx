@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 
 const SORT_OPTIONS = [
   { value: 'alpha',    label: 'A – Z'           },
   { value: 'recent',   label: 'recently opened' },
   { value: 'favfirst', label: 'favorites first' },
-  { value: 'color',    label: 'by color'         },
-  { value: 'size',     label: 'by size'          },
-  { value: 'custom',   label: 'custom order'     },
+  { value: 'color',    label: 'by color'        },
+  { value: 'size',     label: 'by size'         },
+  { value: 'custom',   label: 'custom order'    },
 ]
 
 const GROUP_OPTIONS = [
@@ -14,11 +14,13 @@ const GROUP_OPTIONS = [
   { value: 'color',    label: 'by color'    },
   { value: 'favorite', label: 'by favorite' },
   { value: 'tag',      label: 'by tag'      },
+  { value: 'type',     label: 'by type'     },
 ]
 
-function LabelSelect({ label, value, onChange, options }) {
+function LabelSelect({ value, onChange, options }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
+  const selected = options.find(o => o.value === value)
 
   useEffect(() => {
     if (!open) return
@@ -32,7 +34,7 @@ function LabelSelect({ label, value, onChange, options }) {
   return (
     <div ref={ref} style={{ position: 'relative', flexShrink: 0 }}>
       <button style={styles.lsBtn} onClick={() => setOpen(o => !o)}>
-        <span style={styles.lsLabel}>{label}</span>
+        <span style={styles.lsLabel}>{selected?.label ?? value}</span>
         <span style={styles.lsArrow}>▾</span>
       </button>
       {open && (
@@ -59,9 +61,10 @@ export default function ViewHeader({
   sortBy, onSetSortBy,
   groupBy, onSetGroupBy,
   onNewFolder,
+  reorderMode, onToggleReorderMode,
 }) {
-  const [creating,    setCreating]    = useState(false)
-  const [folderName,  setFolderName]  = useState('')
+  const [creating,   setCreating]   = useState(false)
+  const [folderName, setFolderName] = useState('')
   const inputRef = useRef()
 
   function submitNew() {
@@ -78,36 +81,21 @@ export default function ViewHeader({
 
   return (
     <div style={styles.header}>
-      {/* Back / Forward */}
-      <button
-        style={{ ...styles.navBtn, opacity: canGoBack ? 1 : 0.25 }}
-        onClick={onGoBack}
-        disabled={!canGoBack}
-        title="back"
-      >←</button>
-      <button
-        style={{ ...styles.navBtn, opacity: canGoForward ? 1 : 0.25 }}
-        onClick={onGoForward}
-        disabled={!canGoForward}
-        title="forward"
-      >→</button>
+      <button style={{ ...styles.navBtn, opacity: canGoBack ? 1 : 0.25 }} onClick={onGoBack} disabled={!canGoBack} title="back">←</button>
+      <button style={{ ...styles.navBtn, opacity: canGoForward ? 1 : 0.25 }} onClick={onGoForward} disabled={!canGoForward} title="forward">→</button>
 
-      {/* Breadcrumb */}
       <div style={styles.breadcrumb}>
         {breadcrumb.map((seg, i) => (
           <React.Fragment key={i}>
             {i > 0 && <span style={styles.sep}>›</span>}
-            {seg.onClick ? (
-              <span style={styles.seg} onClick={seg.onClick}>{seg.label}</span>
-            ) : (
-              <span style={styles.current}>{seg.label}</span>
-            )}
+            {seg.onClick
+              ? <span style={styles.seg} onClick={seg.onClick}>{seg.label}</span>
+              : <span style={styles.current}>{seg.label}</span>}
           </React.Fragment>
         ))}
       </div>
 
-      {/* New folder */}
-      {onNewFolder && (creating ? (
+      {onNewFolder && !reorderMode && (creating ? (
         <div style={styles.newFolderRow}>
           <input
             ref={inputRef}
@@ -128,25 +116,30 @@ export default function ViewHeader({
         <button style={styles.newFolderBtn} onClick={() => setCreating(true)} title="new folder">+ folder</button>
       ))}
 
-      {/* Group By */}
-      {onSetGroupBy && (
-        <LabelSelect label="Group By" value={groupBy} onChange={onSetGroupBy} options={GROUP_OPTIONS} />
+      {sortBy === 'custom' && onToggleReorderMode && (
+        reorderMode
+          ? <button style={styles.reorderDoneBtn} onClick={onToggleReorderMode}>done</button>
+          : <button style={styles.reorderBtn}     onClick={onToggleReorderMode}>reorder</button>
       )}
 
-      {/* Sort By */}
-      <LabelSelect label="Sort By" value={sortBy} onChange={onSetSortBy} options={SORT_OPTIONS} />
+      {onSetGroupBy && !reorderMode && (
+        <LabelSelect value={groupBy} onChange={onSetGroupBy} options={GROUP_OPTIONS} />
+      )}
 
-      {/* Icon size: S M L */}
+      {!reorderMode && (
+        <LabelSelect value={sortBy} onChange={onSetSortBy} options={SORT_OPTIONS} />
+      )}
+
       <div style={styles.sizeToggle}>
-        {['S','M','L'].map((label, i) => {
-          const size = ['small','medium','large'][i]
+        {['S', 'M', 'L'].map((lbl, i) => {
+          const size = ['small', 'medium', 'large'][i]
           return (
             <button
               key={size}
               style={{ ...styles.szBtn, ...(iconSize === size ? styles.szActive : {}) }}
               onClick={() => onSetIconSize(size)}
               title={size}
-            >{label}</button>
+            >{lbl}</button>
           )
         })}
       </div>
@@ -156,59 +149,43 @@ export default function ViewHeader({
 
 const styles = {
   header: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 5,
-    padding: '0 10px',
-    borderBottom: '0.5px solid var(--border-subtle)',
-    background: 'var(--bg-deep)',
-    flexShrink: 0,
-    height: 38,
+    display: 'flex', alignItems: 'center', gap: 5,
+    padding: '0 10px', borderBottom: '0.5px solid var(--border-subtle)',
+    background: 'var(--bg-deep)', flexShrink: 0, height: 38,
   },
   navBtn: {
-    fontSize: 15,
-    color: 'var(--text-muted)',
-    background: 'transparent',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '2px 6px',
-    borderRadius: 'var(--radius-sm)',
-    lineHeight: 1,
-    flexShrink: 0,
-    transition: 'opacity 0.1s',
+    fontSize: 'var(--fs-15)', color: 'var(--text-muted)',
+    background: 'transparent', border: 'none', cursor: 'pointer',
+    padding: '2px 6px', borderRadius: 'var(--radius-sm)',
+    lineHeight: 1, flexShrink: 0, transition: 'opacity 0.1s',
   },
   breadcrumb: {
-    flex: 1,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 5,
-    fontSize: 12,
-    minWidth: 0,
-    overflow: 'hidden',
+    flex: 1, display: 'flex', alignItems: 'center', gap: 5,
+    fontSize: 'var(--fs-12)', minWidth: 0, overflow: 'hidden',
   },
   seg:     { color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap', transition: 'color 0.1s' },
   sep:     { color: 'var(--border-mid)', fontSize: 10 },
   current: { color: 'var(--text-secondary)', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   lsBtn: {
     display: 'flex', alignItems: 'center', gap: 4,
-    fontSize: 11, color: 'var(--text-muted)',
+    fontSize: 'var(--fs-11)', color: 'var(--text-muted)',
     background: 'var(--bg-raised)', border: '0.5px solid var(--border-subtle)',
     borderRadius: 'var(--radius-sm)', padding: '3px 8px',
     cursor: 'pointer', letterSpacing: '0.03em',
-    fontFamily: 'var(--font-mono)', width: 94, justifyContent: 'space-between',
+    fontFamily: 'var(--font-mono)', width: 115, justifyContent: 'space-between',
     whiteSpace: 'nowrap', overflow: 'hidden',
   },
-  lsLabel: { flex: 1, textAlign: 'left', whiteSpace: 'nowrap' },
-  lsArrow: { fontSize: 8, opacity: 0.6 },
+  lsLabel: { flex: 1, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  lsArrow: { fontSize: 'var(--fs-8)', opacity: 0.6, flexShrink: 0 },
   lsMenu: {
     position: 'absolute', top: 'calc(100% + 3px)', right: 0,
     background: 'var(--bg-surface)', border: '0.5px solid var(--border-mid)',
     borderRadius: 'var(--radius-sm)', boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-    zIndex: 200, minWidth: 130, padding: '3px 0',
+    zIndex: 200, minWidth: 140, padding: '3px 0',
   },
   lsItem: {
     display: 'block', width: '100%', textAlign: 'left',
-    fontSize: 11, color: 'var(--text-muted)',
+    fontSize: 'var(--fs-11)', color: 'var(--text-muted)',
     background: 'transparent', border: 'none',
     padding: '6px 12px', cursor: 'pointer',
     letterSpacing: '0.03em', fontFamily: 'var(--font-mono)',
@@ -221,14 +198,14 @@ const styles = {
     borderRadius: 'var(--radius-sm)', padding: 2, flexShrink: 0,
   },
   szBtn: {
-    fontSize: 10, padding: '3px 7px', borderRadius: 2,
+    fontSize: 'var(--fs-10)', padding: '3px 7px', borderRadius: 2,
     cursor: 'pointer', color: 'var(--border-strong)',
     background: 'transparent', border: 'none',
     letterSpacing: '0.04em', transition: 'all 0.1s',
   },
   szActive: { background: 'var(--bg-raised)', color: 'var(--accent)', fontWeight: 700 },
   newFolderBtn: {
-    fontSize: 10, color: 'var(--text-muted)',
+    fontSize: 'var(--fs-10)', color: 'var(--text-muted)',
     background: 'var(--bg-raised)', border: '0.5px solid var(--border-subtle)',
     borderRadius: 'var(--radius-sm)', padding: '3px 9px',
     cursor: 'pointer', letterSpacing: '0.04em', fontFamily: 'var(--font-mono)',
@@ -236,17 +213,25 @@ const styles = {
   },
   newFolderRow: { display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 },
   newFolderInput: {
-    fontSize: 11, fontFamily: 'var(--font-mono)',
+    fontSize: 'var(--fs-11)', fontFamily: 'var(--font-mono)',
     background: 'var(--bg-surface)', color: 'var(--text-primary)',
     border: '0.5px solid var(--accent)', borderRadius: 'var(--radius-sm)',
     padding: '3px 7px', outline: 'none', width: 130,
   },
-  newFolderOk: {
-    fontSize: 10, color: 'var(--accent)',
-    background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px',
+  newFolderOk:     { fontSize: 'var(--fs-10)', color: 'var(--accent)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px' },
+  newFolderCancel: { fontSize: 'var(--fs-10)', color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px' },
+  reorderBtn: {
+    fontSize: 'var(--fs-10)', color: 'var(--accent)',
+    background: 'transparent', border: '0.5px solid var(--accent)',
+    borderRadius: 'var(--radius-sm)', padding: '3px 9px',
+    cursor: 'pointer', letterSpacing: '0.04em', fontFamily: 'var(--font-mono)',
+    flexShrink: 0,
   },
-  newFolderCancel: {
-    fontSize: 10, color: 'var(--text-muted)',
-    background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 4px',
+  reorderDoneBtn: {
+    fontSize: 'var(--fs-10)', color: 'var(--bg-base)',
+    background: 'var(--accent)', border: 'none',
+    borderRadius: 'var(--radius-sm)', padding: '3px 9px',
+    cursor: 'pointer', letterSpacing: '0.04em', fontFamily: 'var(--font-mono)',
+    flexShrink: 0, fontWeight: 700,
   },
 }

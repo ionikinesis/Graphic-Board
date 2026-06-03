@@ -5,7 +5,7 @@ import { PRESET_COLORS } from '../utils/color.js'
 const darkThemes  = Object.entries(themes).filter(([, t]) => t.mode === 'dark')
 const lightThemes = Object.entries(themes).filter(([, t]) => t.mode === 'light')
 
-export default function SettingsModal({ roots, activeRootId, onAddRoot, onRemoveRoot, onSwitchRoot, onClose, scale, onSetScale, currentTheme, onSetTheme, customColors, onSetCustomColors, tagManager }) {
+export default function SettingsModal({ roots, activeRootId, onAddRoot, onRemoveRoot, onSwitchRoot, onClose, scale, onSetScale, textScale, onSetTextScale, currentTheme, onSetTheme, customColors, onSetCustomColors, tagManager, onSetRootAbsPath, highContrast, onSetHighContrast }) {
   return (
     <div style={s.backdrop} onClick={onClose}>
       <div style={s.panel} onClick={e => e.stopPropagation()}>
@@ -21,34 +21,16 @@ export default function SettingsModal({ roots, activeRootId, onAddRoot, onRemove
             {roots.length === 0 && (
               <div style={s.rootEmpty}>no folders — add one below</div>
             )}
-            {roots.map(root => {
-              const isActive  = root.id === activeRootId
-              const canSwitch = root.status !== 'missing' && !isActive
-              return (
-                <div
-                  key={root.id}
-                  style={{
-                    ...s.rootRow,
-                    borderColor: isActive ? 'var(--accent)' : 'var(--border-subtle)',
-                    cursor: canSwitch ? 'pointer' : 'default',
-                    opacity: root.status === 'missing' ? 0.45 : 1,
-                  }}
-                  onClick={canSwitch ? () => onSwitchRoot(root.id) : undefined}
-                >
-                  <span style={{ ...s.folderIcon, color: isActive ? 'var(--accent)' : 'var(--text-muted)' }}>⌂</span>
-                  <span style={s.rootName}>{root.name}</span>
-                  {root.status === 'needs-permission' && (
-                    <span style={s.permBadge}>needs access</span>
-                  )}
-                  {isActive && <span style={s.activeDot} />}
-                  <button
-                    style={s.removeRootBtn}
-                    onClick={e => { e.stopPropagation(); onRemoveRoot(root.id) }}
-                    title="remove folder"
-                  >×</button>
-                </div>
-              )
-            })}
+            {roots.map(root => (
+              <RootRow
+                key={root.id}
+                root={root}
+                isActive={root.id === activeRootId}
+                onSwitch={() => onSwitchRoot(root.id)}
+                onRemove={() => onRemoveRoot(root.id)}
+                onSetAbsPath={path => onSetRootAbsPath(root.id, path)}
+              />
+            ))}
           </div>
           <button style={s.addFolderBtn} onClick={onAddRoot}>+ add folder</button>
 
@@ -95,6 +77,37 @@ export default function SettingsModal({ roots, activeRootId, onAddRoot, onRemove
             )}
           </div>
 
+          {/* Text scale */}
+          <div style={s.sectionLabel}>text scale</div>
+          <div style={s.scaleRow}>
+            <input
+              type="range" min="0.8" max="1.3" step="0.05" value={textScale ?? 1.0}
+              onChange={e => onSetTextScale(parseFloat(e.target.value))}
+              style={s.slider}
+            />
+            <span style={s.scaleValue}>{Math.round((textScale ?? 1.0) * 100)}%</span>
+            {(textScale ?? 1.0) !== 1.0 && (
+              <button style={s.resetBtn} onClick={() => onSetTextScale(1.0)}>reset</button>
+            )}
+          </div>
+
+          <div style={s.rule} />
+
+          {/* Accessibility */}
+          <div style={s.sectionLabel}>accessibility</div>
+          <div style={s.hcRow}>
+            <div style={s.hcInfo}>
+              <span style={s.hcLabel}>high contrast mode</span>
+              <span style={s.hcSub}>boosts text and border contrast; replaces accent with yellow (dark) or blue (light) for colorblind visibility</span>
+            </div>
+            <button
+              style={{ ...s.hcToggle, background: highContrast ? 'var(--accent)' : 'var(--bg-deep)', color: highContrast ? 'var(--accent-text)' : 'var(--text-muted)', borderColor: highContrast ? 'var(--accent)' : 'var(--border-mid)' }}
+              onClick={() => onSetHighContrast(!highContrast)}
+            >
+              {highContrast ? 'on' : 'off'}
+            </button>
+          </div>
+
           <div style={s.rule} />
 
           {/* Tag manager */}
@@ -110,6 +123,48 @@ export default function SettingsModal({ roots, activeRootId, onAddRoot, onRemove
           </p>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Root row ───────────────────────────────────────────────────────────────
+
+function RootRow({ root, isActive, onSwitch, onRemove, onSetAbsPath }) {
+  const canSwitch = root.status !== 'missing' && !isActive
+  const [pathDraft, setPathDraft] = useState(root.absPath || '')
+  useEffect(() => { setPathDraft(root.absPath || '') }, [root.absPath])
+
+  function commitPath() { onSetAbsPath(pathDraft.trim() || null) }
+
+  return (
+    <div>
+      <div
+        style={{
+          ...s.rootRow,
+          borderColor: isActive ? 'var(--accent)' : 'var(--border-subtle)',
+          cursor: canSwitch ? 'pointer' : 'default',
+          opacity: root.status === 'missing' ? 0.45 : 1,
+        }}
+        onClick={canSwitch ? onSwitch : undefined}
+      >
+        <span style={{ ...s.folderIcon, color: isActive ? 'var(--accent)' : 'var(--text-muted)' }}>⌂</span>
+        <span style={s.rootName}>{root.name}</span>
+        {root.status === 'needs-permission' && <span style={s.permBadge}>needs access</span>}
+        {isActive && <span style={s.activeDot} />}
+        <button style={s.removeRootBtn} onClick={e => { e.stopPropagation(); onRemove() }} title="remove folder">×</button>
+      </div>
+      {isActive && (
+        <input
+          type="text"
+          value={pathDraft}
+          placeholder={root.absPath ? undefined : 'C:\\path\\to\\folder  (for Show in Explorer)'}
+          spellCheck={false}
+          style={s.absPathInput}
+          onChange={e => setPathDraft(e.target.value)}
+          onBlur={commitPath}
+          onKeyDown={e => { if (e.key === 'Enter') { commitPath(); e.target.blur() } }}
+        />
+      )}
     </div>
   )
 }
@@ -279,10 +334,10 @@ function CustomThemeSection({ isActive, onSelect, colors, onChange }) {
         onClick={onSelect}
       >
         <span style={{ width: 9, height: 9, borderRadius: '50%', background: colors.accent, flexShrink: 0, border: `0.5px solid rgba(255,255,255,0.2)` }} />
-        <span style={{ flex: 1, fontSize: 12, fontFamily: 'var(--font-mono)', color: colors.text, letterSpacing: '0.04em' }}>
+        <span style={{ flex: 1, fontSize: 'var(--fs-12)', fontFamily: 'var(--font-mono)', color: colors.text, letterSpacing: '0.04em' }}>
           custom
         </span>
-        {isActive && <span style={{ fontSize: 11, color: colors.accent }}>✓</span>}
+        {isActive && <span style={{ fontSize: 'var(--fs-11)', color: colors.accent }}>✓</span>}
       </button>
 
       {/* Hex editors — only shown when custom is active */}
@@ -350,10 +405,10 @@ function ThemeChip({ theme, isActive, onSelect }) {
       onClick={onSelect}
     >
       <span style={{ width: 9, height: 9, borderRadius: '50%', background: v['--accent'], flexShrink: 0, border: `0.5px solid ${v['--border-strong']}` }} />
-      <span style={{ flex: 1, fontSize: 12, fontFamily: 'var(--font-mono)', color: v['--text-secondary'], letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+      <span style={{ flex: 1, fontSize: 'var(--fs-12)', fontFamily: 'var(--font-mono)', color: v['--text-secondary'], letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
         {theme.label}
       </span>
-      {isActive && <span style={{ fontSize: 11, color: v['--accent'] }}>✓</span>}
+      {isActive && <span style={{ fontSize: 'var(--fs-11)', color: v['--accent'] }}>✓</span>}
     </button>
   )
 }
@@ -366,7 +421,7 @@ const s = {
     zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center',
   },
   panel: {
-    width: 400, maxHeight: '90vh',
+    width: 400, maxHeight: 'calc(90vh / var(--app-scale, 1))',
     background: 'var(--bg-surface)', border: '0.5px solid var(--border-mid)',
     borderRadius: 'var(--radius-lg)', overflow: 'hidden',
     boxShadow: '0 8px 40px rgba(0,0,0,0.5)',
@@ -377,44 +432,56 @@ const s = {
     padding: '14px 18px', borderBottom: '0.5px solid var(--border-subtle)',
     background: 'var(--bg-deep)', flexShrink: 0,
   },
-  title:    { fontSize: 13, color: 'var(--text-secondary)', letterSpacing: '0.06em', fontWeight: 700 },
-  closeBtn: { fontSize: 12, color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 7px', borderRadius: 3 },
-  body:     { padding: 18, display: 'flex', flexDirection: 'column', gap: 11, overflowY: 'auto' },
-  sectionLabel: { fontSize: 10, letterSpacing: '0.18em', color: 'var(--border-strong)', textTransform: 'uppercase', fontWeight: 700 },
+  title:    { fontSize: 'var(--fs-13)', color: 'var(--text-secondary)', letterSpacing: '0.06em', fontWeight: 700 },
+  closeBtn: { fontSize: 'var(--fs-12)', color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 7px', borderRadius: 3 },
+  body:     { padding: 18, display: 'flex', flexDirection: 'column', gap: 11, overflowY: 'auto', flex: 1, minHeight: 0 },
+  sectionLabel: { fontSize: 'var(--fs-10)', letterSpacing: '0.18em', color: 'var(--border-strong)', textTransform: 'uppercase', fontWeight: 700 },
   rootList: { display: 'flex', flexDirection: 'column', gap: 5 },
-  rootEmpty: { fontSize: 11, color: 'var(--border-strong)', letterSpacing: '0.04em', fontStyle: 'italic', padding: '4px 2px' },
+  rootEmpty: { fontSize: 'var(--fs-11)', color: 'var(--border-strong)', letterSpacing: '0.04em', fontStyle: 'italic', padding: '4px 2px' },
   rootRow: {
     display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px',
     background: 'var(--bg-raised)', borderRadius: 'var(--radius-sm)',
     border: '0.5px solid var(--border-subtle)', transition: 'border-color 0.1s',
   },
-  folderIcon:    { fontSize: 14, flexShrink: 0 },
-  rootName:      { flex: 1, fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', letterSpacing: '0.03em' },
-  permBadge:     { fontSize: 9, color: 'var(--accent)', border: '0.5px solid var(--accent-dim)', borderRadius: 2, padding: '1px 5px', letterSpacing: '0.06em', flexShrink: 0 },
+  folderIcon:    { fontSize: 'var(--fs-14)', flexShrink: 0 },
+  rootName:      { flex: 1, fontSize: 'var(--fs-12)', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', letterSpacing: '0.03em' },
+  permBadge:     { fontSize: 'var(--fs-9)', color: 'var(--accent)', border: '0.5px solid var(--accent-dim)', borderRadius: 2, padding: '1px 5px', letterSpacing: '0.06em', flexShrink: 0 },
   activeDot:     { width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flexShrink: 0 },
-  removeRootBtn: { fontSize: 14, lineHeight: 1, color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '0 2px', flexShrink: 0 },
+  removeRootBtn: { fontSize: 'var(--fs-14)', lineHeight: 1, color: 'var(--text-muted)', background: 'transparent', border: 'none', cursor: 'pointer', padding: '0 2px', flexShrink: 0 },
   addFolderBtn: {
-    fontSize: 12, padding: '7px 14px', borderRadius: 'var(--radius-sm)', border: 'none',
+    fontSize: 'var(--fs-12)', padding: '7px 14px', borderRadius: 'var(--radius-sm)', border: 'none',
     background: 'var(--accent)', color: 'var(--accent-text)', fontWeight: 700,
     letterSpacing: '0.04em', cursor: 'pointer', fontFamily: 'var(--font-mono)', alignSelf: 'flex-start',
   },
   rule:         { height: '0.5px', background: 'var(--border-subtle)', margin: '2px 0' },
   themeColumns: { display: 'flex', gap: 10 },
   themeCol:     { flex: 1, display: 'flex', flexDirection: 'column' },
-  themeColLabel:{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.12em', marginBottom: 6, textTransform: 'uppercase' },
+  themeColLabel:{ fontSize: 'var(--fs-10)', color: 'var(--text-muted)', letterSpacing: '0.12em', marginBottom: 6, textTransform: 'uppercase' },
   scaleRow:     { display: 'flex', alignItems: 'center', gap: 9 },
   slider:       { flex: 1, cursor: 'pointer', accentColor: 'var(--accent)' },
-  scaleValue:   { fontSize: 12, color: 'var(--text-secondary)', minWidth: 36, textAlign: 'right', fontWeight: 700 },
+  scaleValue:   { fontSize: 'var(--fs-12)', color: 'var(--text-secondary)', minWidth: 36, textAlign: 'right', fontWeight: 700 },
   resetBtn: {
-    fontSize: 10, padding: '4px 9px', border: '0.5px solid var(--border-mid)',
+    fontSize: 'var(--fs-10)', padding: '4px 9px', border: '0.5px solid var(--border-mid)',
     borderRadius: 'var(--radius-sm)', background: 'transparent', color: 'var(--text-muted)',
     cursor: 'pointer', letterSpacing: '0.03em', fontFamily: 'var(--font-mono)',
   },
-  hint: { fontSize: 11, color: 'var(--border-strong)', lineHeight: 1.8, letterSpacing: '0.04em' },
+  hint: { fontSize: 'var(--fs-11)', color: 'var(--border-strong)', lineHeight: 1.8, letterSpacing: '0.04em' },
+  hcRow:    { display: 'flex', alignItems: 'center', gap: 12 },
+  hcInfo:   { flex: 1, display: 'flex', flexDirection: 'column', gap: 3 },
+  hcLabel:  { fontSize: 'var(--fs-12)', color: 'var(--text-secondary)', fontWeight: 700, letterSpacing: '0.04em' },
+  hcSub:    { fontSize: 'var(--fs-10)', color: 'var(--text-muted)', lineHeight: 1.6, letterSpacing: '0.03em' },
+  hcToggle: { fontSize: 'var(--fs-11)', fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: '0.08em', padding: '6px 14px', border: '1px solid', borderRadius: 'var(--radius-sm)', cursor: 'pointer', flexShrink: 0, transition: 'all 0.15s' },
+  absPathInput: {
+    width: '100%', boxSizing: 'border-box', marginTop: 3,
+    fontSize: 'var(--fs-10)', color: 'var(--text-muted)',
+    background: 'var(--bg-base)', border: '0.5px solid var(--border-subtle)',
+    borderRadius: 3, padding: '4px 8px',
+    fontFamily: 'var(--font-mono)', letterSpacing: '0.04em', outline: 'none',
+  },
 
   // tag manager
   tagManager: { display: 'flex', flexDirection: 'column', gap: 3 },
-  tagEmpty:   { fontSize: 11, color: 'var(--border-strong)', letterSpacing: '0.04em', fontStyle: 'italic', padding: '4px 0' },
+  tagEmpty:   { fontSize: 'var(--fs-11)', color: 'var(--border-strong)', letterSpacing: '0.04em', fontStyle: 'italic', padding: '4px 0' },
   tagRowWrap: {
     display: 'flex', alignItems: 'center', gap: 6,
     padding: '5px 8px',
@@ -423,16 +490,16 @@ const s = {
   },
   tagColorLabel: { cursor: 'pointer', flexShrink: 0, position: 'relative', display: 'flex', alignItems: 'center' },
   tagDot:  { width: 10, height: 10, borderRadius: '50%', display: 'block' },
-  tagName: { flex: 1, fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', cursor: 'pointer', letterSpacing: '0.04em' },
-  tagCount:{ fontSize: 10, color: 'var(--border-strong)', minWidth: 18, textAlign: 'right', flexShrink: 0 },
+  tagName: { flex: 1, fontSize: 'var(--fs-12)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', cursor: 'pointer', letterSpacing: '0.04em' },
+  tagCount:{ fontSize: 'var(--fs-10)', color: 'var(--border-strong)', minWidth: 18, textAlign: 'right', flexShrink: 0 },
   tagEditInput: {
-    flex: 1, fontSize: 12, color: 'var(--text-secondary)',
+    flex: 1, fontSize: 'var(--fs-12)', color: 'var(--text-secondary)',
     background: 'var(--bg-base)', border: '0.5px solid var(--accent)',
     borderRadius: 2, padding: '1px 5px', fontFamily: 'var(--font-mono)',
     letterSpacing: '0.04em', outline: 'none',
   },
   tagActionBtn: {
-    fontSize: 12, color: 'var(--text-muted)', background: 'transparent',
+    fontSize: 'var(--fs-12)', color: 'var(--text-muted)', background: 'transparent',
     border: 'none', cursor: 'pointer', padding: '2px 4px', borderRadius: 2, flexShrink: 0,
   },
   mergeMenu: {
@@ -441,23 +508,23 @@ const s = {
     borderRadius: 3, boxShadow: '0 4px 14px rgba(0,0,0,0.45)',
     zIndex: 300, minWidth: 120, padding: '3px 0',
   },
-  mergeLabel: { fontSize: 9, color: 'var(--text-muted)', padding: '3px 10px 4px', letterSpacing: '0.1em', textTransform: 'uppercase' },
+  mergeLabel: { fontSize: 'var(--fs-9)', color: 'var(--text-muted)', padding: '3px 10px 4px', letterSpacing: '0.1em', textTransform: 'uppercase' },
   mergeItem: {
     display: 'block', width: '100%', textAlign: 'left',
-    fontSize: 11, color: 'var(--text-secondary)', background: 'transparent',
+    fontSize: 'var(--fs-11)', color: 'var(--text-secondary)', background: 'transparent',
     border: 'none', padding: '5px 10px', cursor: 'pointer',
     fontFamily: 'var(--font-mono)', letterSpacing: '0.03em',
   },
   newTagRow: { display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 },
   newColorLabel: { cursor: 'pointer', flexShrink: 0, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderRadius: 3, border: '0.5px solid var(--border-mid)', background: 'var(--bg-base)' },
   newTagInput: {
-    flex: 1, fontSize: 11, color: 'var(--text-secondary)',
+    flex: 1, fontSize: 'var(--fs-11)', color: 'var(--text-secondary)',
     background: 'var(--bg-raised)', border: '0.5px solid var(--border-mid)',
     borderRadius: 3, padding: '4px 8px', fontFamily: 'var(--font-mono)',
     letterSpacing: '0.04em', outline: 'none',
   },
   newTagAdd: {
-    fontSize: 11, padding: '4px 10px', background: 'var(--accent)', color: 'var(--accent-text)',
+    fontSize: 'var(--fs-11)', padding: '4px 10px', background: 'var(--accent)', color: 'var(--accent-text)',
     border: 'none', borderRadius: 3, cursor: 'pointer', fontWeight: 700,
     fontFamily: 'var(--font-mono)', letterSpacing: '0.04em', flexShrink: 0,
   },
@@ -472,7 +539,7 @@ const s = {
   },
   colorInputRow: { display: 'flex', alignItems: 'center', gap: 8 },
   colorInputLabel: {
-    fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)',
+    fontSize: 'var(--fs-11)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)',
     letterSpacing: '0.06em', width: 80, flexShrink: 0,
   },
   colorSwatch: {
@@ -481,7 +548,7 @@ const s = {
     position: 'relative', display: 'block',
   },
   colorHexInput: {
-    flex: 1, fontSize: 11, color: 'var(--text-secondary)',
+    flex: 1, fontSize: 'var(--fs-11)', color: 'var(--text-secondary)',
     background: 'var(--bg-base)', border: '0.5px solid var(--border-mid)',
     borderRadius: 3, padding: '4px 8px',
     fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', outline: 'none',

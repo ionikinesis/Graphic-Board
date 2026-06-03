@@ -1,8 +1,17 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { PRESET_COLORS } from '../utils/color.js'
 
 export default function ContextMenu({ x, y, items, onClose }) {
   const ref = useRef()
+  const [pos, setPos] = useState(null)
+
+  useLayoutEffect(() => {
+    if (!ref.current) return
+    const rect = ref.current.getBoundingClientRect()
+    const left = Math.max(8, Math.min(x, window.innerWidth  - rect.width  - 8))
+    const top  = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))
+    setPos({ left, top })
+  }, [])
 
   useEffect(() => {
     function onMouseDown(e) {
@@ -19,22 +28,11 @@ export default function ContextMenu({ x, y, items, onClose }) {
     }
   }, [onClose])
 
-  const menuW = 210
-  const estH  = items.reduce((h, it) => h + (
-    it.separator   ? 9  :
-    it.colorRow    ? 36 :
-    it.tagRow      ? 60 :
-    it.linkRow     ? 90 :
-    it.sortNameRow ? 52 :
-    30
-  ), 8)
-  const left  = Math.min(x, window.innerWidth  - menuW - 8)
-  const top   = Math.min(y, window.innerHeight - estH  - 8)
-
   return (
     <div
       ref={ref}
-      style={{ ...s.menu, left, top }}
+      style={{ ...s.menu, left: pos ? pos.left : x, top: pos ? pos.top : y, visibility: pos ? 'visible' : 'hidden' }}
+      data-contextmenu="1"
       onContextMenu={e => e.preventDefault()}
     >
       {items.map((item, i) => {
@@ -381,7 +379,7 @@ const s = {
     background: 'transparent',
     border: 'none',
     color: 'var(--text-secondary)',
-    fontSize: 12,
+    fontSize: 'var(--fs-12)',
     letterSpacing: '0.04em',
     cursor: 'pointer',
     textAlign: 'left',
@@ -390,14 +388,14 @@ const s = {
   },
   itemDisabled: { opacity: 0.3, cursor: 'default', pointerEvents: 'none' },
   itemDanger:   { color: '#e05050' },
-  icon: { fontSize: 13, color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 },
-  badge: { fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.05em' },
+  icon: { fontSize: 'var(--fs-13)', color: 'var(--text-muted)', width: 16, textAlign: 'center', flexShrink: 0 },
+  badge: { fontSize: 'var(--fs-10)', color: 'var(--text-muted)', letterSpacing: '0.05em' },
   sep: { height: '0.5px', background: 'var(--border-subtle)', margin: '3px 8px' },
   colorSection: { padding: '6px 12px 8px' },
   colorHeader: { display: 'flex', alignItems: 'center', marginBottom: 7 },
-  colorLabel: { fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', flex: 1, fontWeight: 700 },
+  colorLabel: { fontSize: 'var(--fs-10)', color: 'var(--text-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', flex: 1, fontWeight: 700 },
   colorClear: {
-    fontSize: 9, color: 'var(--text-muted)',
+    fontSize: 'var(--fs-9)', color: 'var(--text-muted)',
     background: 'transparent', border: '0.5px solid var(--border-mid)',
     borderRadius: 2, padding: '2px 6px', cursor: 'pointer', letterSpacing: '0.04em',
   },
@@ -430,7 +428,7 @@ const s = {
   },
   hexInput: {
     flex: 1,
-    fontSize: 12,
+    fontSize: 'var(--fs-12)',
     color: 'var(--text-secondary)',
     background: 'var(--bg-raised)',
     border: '0.5px solid var(--border-mid)',
@@ -442,11 +440,11 @@ const s = {
   },
   tagSection: { padding: '6px 12px 8px' },
   tagHeader: { display: 'flex', alignItems: 'center', marginBottom: 6 },
-  tagLabel: { fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700 },
+  tagLabel: { fontSize: 'var(--fs-10)', color: 'var(--text-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700 },
   tagChips: { display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 6, minHeight: 0 },
   chip: {
     display: 'inline-flex', alignItems: 'center', gap: 3,
-    fontSize: 10, color: 'var(--text-secondary)',
+    fontSize: 'var(--fs-10)', color: 'var(--text-secondary)',
     background: 'var(--bg-raised)', border: '0.5px solid var(--border-mid)',
     borderRadius: 3, padding: '2px 6px',
     letterSpacing: '0.04em', fontFamily: 'var(--font-mono)',
@@ -454,12 +452,12 @@ const s = {
   chipDot: { width: 6, height: 6, borderRadius: '50%', flexShrink: 0 },
   chipX: {
     background: 'none', border: 'none', cursor: 'pointer',
-    color: 'var(--text-muted)', fontSize: 12, lineHeight: 1,
+    color: 'var(--text-muted)', fontSize: 'var(--fs-12)', lineHeight: 1,
     padding: '0 0 0 2px',
   },
   tagInput: {
     width: '100%', boxSizing: 'border-box',
-    fontSize: 11, color: 'var(--text-secondary)',
+    fontSize: 'var(--fs-11)', color: 'var(--text-secondary)',
     background: 'var(--bg-raised)', border: '0.5px solid var(--border-mid)',
     borderRadius: 3, padding: '4px 7px',
     fontFamily: 'var(--font-mono)', outline: 'none',
@@ -469,7 +467,7 @@ const s = {
     display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 4,
   },
   suggestionBtn: {
-    fontSize: 10, color: 'var(--text-muted)',
+    fontSize: 'var(--fs-10)', color: 'var(--text-muted)',
     background: 'var(--bg-base)', border: '0.5px solid var(--border-subtle)',
     borderRadius: 3, padding: '2px 6px', cursor: 'pointer',
     fontFamily: 'var(--font-mono)', letterSpacing: '0.04em',
@@ -477,25 +475,25 @@ const s = {
   linkSection: { padding: '6px 12px 8px' },
   linkHeader:  { display: 'flex', alignItems: 'center', marginBottom: 6 },
   linkLabel: {
-    fontSize: 10, color: 'var(--text-muted)',
+    fontSize: 'var(--fs-10)', color: 'var(--text-muted)',
     letterSpacing: '0.1em', textTransform: 'uppercase', fontWeight: 700, flex: 1,
   },
   linkInput: {
     width: '100%', boxSizing: 'border-box',
-    fontSize: 11, color: 'var(--text-secondary)',
+    fontSize: 'var(--fs-11)', color: 'var(--text-secondary)',
     background: 'var(--bg-raised)', border: '0.5px solid var(--border-mid)',
     borderRadius: 3, padding: '4px 7px',
     fontFamily: 'var(--font-mono)', outline: 'none', letterSpacing: '0.04em',
   },
   linkActions: { display: 'flex', gap: 4, marginTop: 6 },
   linkSave: {
-    flex: 1, fontSize: 11, color: 'var(--accent)',
+    flex: 1, fontSize: 'var(--fs-11)', color: 'var(--accent)',
     background: 'var(--accent-faint)', border: '0.5px solid var(--accent-dim)',
     borderRadius: 3, padding: '4px 8px', cursor: 'pointer',
     letterSpacing: '0.04em', fontFamily: 'var(--font-mono)',
   },
   linkCancel: {
-    flex: 1, fontSize: 11, color: 'var(--text-muted)',
+    flex: 1, fontSize: 'var(--fs-11)', color: 'var(--text-muted)',
     background: 'transparent', border: '0.5px solid var(--border-mid)',
     borderRadius: 3, padding: '4px 8px', cursor: 'pointer',
     letterSpacing: '0.04em', fontFamily: 'var(--font-mono)',
@@ -512,15 +510,15 @@ const s = {
   },
   favicon: { width: 14, height: 14, flexShrink: 0 },
   linkTitle: {
-    fontSize: 11, color: 'var(--text-secondary)',
+    fontSize: 'var(--fs-11)', color: 'var(--text-secondary)',
     fontFamily: 'var(--font-mono)', letterSpacing: '0.04em',
     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
   },
-  linkExternal: { fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 },
+  linkExternal: { fontSize: 'var(--fs-10)', color: 'var(--text-muted)', flexShrink: 0 },
   linkEditBtn: {
     width: 26, height: 26, flexShrink: 0,
     background: 'var(--bg-raised)', border: '0.5px solid var(--border-mid)',
-    borderRadius: 4, cursor: 'pointer', fontSize: 13,
+    borderRadius: 4, cursor: 'pointer', fontSize: 'var(--fs-13)',
     color: 'var(--text-muted)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
   },

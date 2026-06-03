@@ -1,6 +1,6 @@
 import React from 'react'
 
-export default function SetupScreen({ status, rootName, onChoose, onGrant }) {
+export default function SetupScreen({ status, rootName, onChoose, onGrant, onOpenHelp }) {
   const needsPermission = status === 'needs-permission'
 
   return (
@@ -28,6 +28,9 @@ export default function SetupScreen({ status, rootName, onChoose, onGrant }) {
           <>
             <button style={s.primaryBtn} onClick={onChoose}>
               browse for folder
+            </button>
+            <button style={s.helpBtn} onClick={onOpenHelp}>
+              ? how does this work
             </button>
           </>
         )}
@@ -61,7 +64,7 @@ const s = {
     transition: 'filter 0.2s',
   },
   sub: {
-    fontSize: 13,
+    fontSize: 'var(--fs-13)',
     color: 'var(--text-muted)',
     letterSpacing: '0.06em',
   },
@@ -72,7 +75,7 @@ const s = {
     margin: '4px 0',
   },
   body: {
-    fontSize: 13,
+    fontSize: 'var(--fs-13)',
     color: 'var(--text-muted)',
     lineHeight: 1.9,
     letterSpacing: '0.03em',
@@ -82,7 +85,7 @@ const s = {
   },
   primaryBtn: {
     marginTop: 8,
-    fontSize: 13,
+    fontSize: 'var(--fs-13)',
     padding: '9px 22px',
     borderRadius: 'var(--radius-md)',
     border: 'none',
@@ -95,7 +98,7 @@ const s = {
     fontFamily: 'var(--font-mono)',
   },
   secondaryBtn: {
-    fontSize: 12,
+    fontSize: 'var(--fs-12)',
     padding: '7px 16px',
     borderRadius: 'var(--radius-md)',
     border: '0.5px solid var(--border-mid)',
@@ -106,8 +109,21 @@ const s = {
     transition: 'all 0.12s',
     fontFamily: 'var(--font-mono)',
   },
+  helpBtn: {
+    fontSize: 'var(--fs-11)',
+    color: 'var(--accent)',
+    background: 'transparent',
+    border: '1px solid var(--accent)',
+    borderRadius: 'var(--radius-md)',
+    padding: '6px 16px',
+    cursor: 'pointer',
+    letterSpacing: '0.06em',
+    fontFamily: 'var(--font-mono)',
+    transition: 'opacity 0.12s',
+    marginTop: 2,
+  },
   hint: {
-    fontSize: 11,
+    fontSize: 'var(--fs-11)',
     color: 'var(--border-strong)',
     letterSpacing: '0.06em',
     lineHeight: 1.7,

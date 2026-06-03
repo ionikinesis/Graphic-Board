@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 const IMAGE_RE = /\.(jpe?g|png|gif|webp|avif|bmp|tiff?|svg)$/i
+const VIDEO_RE = /\.(mp4|webm|mov|m4v|ogg|ogv|avi|mkv)$/i
+const MEDIA_RE = /\.(jpe?g|png|gif|webp|avif|bmp|tiff?|svg|mp4|webm|mov|m4v|ogg|ogv|avi|mkv)$/i
 
 async function scanDir(handle) {
   const folders = []
@@ -10,22 +12,22 @@ async function scanDir(handle) {
     if (h.kind === 'directory') {
       let thumb = null, imgCount = 0, subCount = 0
       for await (const [fn, fh] of h.entries()) {
-        if (fh.kind === 'file' && IMAGE_RE.test(fn)) {
+        if (fh.kind === 'file' && MEDIA_RE.test(fn)) {
           imgCount++
-          if (!thumb) thumb = fh
+          if (!thumb && IMAGE_RE.test(fn)) thumb = fh // only use images as auto-thumbs
         } else if (fh.kind === 'directory') {
           subCount++
         }
       }
       folders.push({
-        id: name, // stable within directory — safe as React key
+        id: name,
         name,
         handle: h,
         thumbnailHandle: thumb,
         imageCount: imgCount,
         subfolderCount: subCount,
       })
-    } else if (h.kind === 'file' && IMAGE_RE.test(name)) {
+    } else if (h.kind === 'file' && MEDIA_RE.test(name)) {
       hasImages = true
     }
   }
@@ -42,6 +44,7 @@ export function useNavigator(rootHandle) {
   const [hasImages,   setHasImages]  = useState(false)
   const [loading,     setLoading]    = useState(false)
   const [scanVersion, setScanVersion] = useState(0)
+  const prevHandleRef = useRef(null)
 
   useEffect(() => {
     if (!rootHandle) {
@@ -55,9 +58,12 @@ export function useNavigator(rootHandle) {
 
   useEffect(() => {
     if (!currentHandle) { setFolders([]); setHasImages(false); return }
+    // Only wipe the list when navigating to a different folder (not on refresh)
+    const handleChanged = currentHandle !== prevHandleRef.current
+    prevHandleRef.current = currentHandle
+    if (handleChanged) { setFolders([]); setHasImages(false) }
     let cancelled = false
     setLoading(true)
-    setFolders([]); setHasImages(false)
     scanDir(currentHandle)
       .then(({ folders, hasImages }) => {
         if (!cancelled) { setFolders(folders); setHasImages(hasImages); setLoading(false) }
@@ -101,6 +107,11 @@ export function useNavigator(rootHandle) {
 
   const refreshCurrent = useCallback(() => setScanVersion(v => v + 1), [])
 
+  const addFolderOptimistic = useCallback((name, handle) => {
+    const entry = { id: name, name, handle, thumbnailHandle: null, imageCount: 0, subfolderCount: 0 }
+    setFolders(prev => prev.some(f => f.name === name) ? prev : [...prev, entry])
+  }, [])
+
   const breadcrumb = (() => {
     const crumbs = []
     if (rootHandle) crumbs.push({ label: rootHandle.name, index: -1 })
@@ -112,7 +123,9 @@ export function useNavigator(rootHandle) {
     const images = []
     for await (const [name, handle] of folderHandle.entries()) {
       if (handle.kind === 'file' && IMAGE_RE.test(name)) {
-        images.push({ id: name, name, handle })
+        images.push({ id: name, name, handle, mediaType: 'image' })
+      } else if (handle.kind === 'file' && VIDEO_RE.test(name)) {
+        images.push({ id: name, name, handle, mediaType: 'video' })
       }
     }
     images.sort((a, b) => a.name.localeCompare(b.name))
@@ -129,6 +142,6 @@ export function useNavigator(rootHandle) {
     canGoBack:    stack.length > 0,
     canGoForward: forwardStack.length > 0,
     navigateInto, navigateToPath, goBack, goForward,
-    loadImages, getImageUrl, refreshCurrent,
+    loadImages, getImageUrl, refreshCurrent, addFolderOptimistic,
   }
 }

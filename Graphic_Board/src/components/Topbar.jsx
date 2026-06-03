@@ -1,6 +1,15 @@
-import React from 'react'
+import React, { useState } from 'react'
 
-export default function Topbar({ onOpenSettings, onNavigateHome, loading }) {
+async function tauriCmd(method) {
+  try {
+    const w = window.__TAURI__?.window
+    if (!w) return
+    const win = typeof w.getCurrentWindow === 'function' ? w.getCurrentWindow() : w.appWindow
+    await win[method]()
+  } catch {}
+}
+
+export default function Topbar({ onOpenSettings, onOpenHelp, onNavigateHome, loading }) {
   return (
     <header style={s.topbar}>
       <div style={s.logoWrap} onClick={onNavigateHome} title="home">
@@ -9,11 +18,38 @@ export default function Topbar({ onOpenSettings, onNavigateHome, loading }) {
       </div>
       <div style={s.right}>
         {loading && <span style={s.loadingLabel}>loading...</span>}
+        <button style={s.helpBtn} onClick={onOpenHelp} title="help">
+          ?
+        </button>
         <button style={s.gearBtn} onClick={onOpenSettings} title="settings">
           ⚙
         </button>
+        <div style={s.winControls}>
+          <WinBtn title="minimize" onClick={() => tauriCmd('minimize')}>─</WinBtn>
+          <WinBtn title="maximize" onClick={() => tauriCmd('maximize')}>□</WinBtn>
+          <WinBtn title="close"    onClick={() => tauriCmd('close')} close>✕</WinBtn>
+        </div>
       </div>
     </header>
+  )
+}
+
+function WinBtn({ children, onClick, title, close }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <button
+      title={title}
+      style={{
+        ...s.winBtn,
+        ...(hovered && !close && { background: 'var(--bg-raised)', color: 'var(--text-primary)' }),
+        ...(hovered &&  close && { background: 'rgba(180,40,40,0.22)', color: '#e05050', borderColor: 'rgba(180,40,40,0.35)' }),
+      }}
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -26,7 +62,8 @@ const s = {
     borderBottom: '0.5px solid var(--border-subtle)',
     background: 'var(--bg-deep)',
     flexShrink: 0,
-    height: 72,
+    height: 46,
+    WebkitAppRegion: 'drag',
   },
   logoWrap: {
     display: 'flex',
@@ -34,16 +71,17 @@ const s = {
     cursor: 'pointer',
     opacity: 0.9,
     transition: 'opacity 0.1s',
+    WebkitAppRegion: 'no-drag',
   },
   logoImg: {
-    height: 78,
+    height: 39,
     display: 'block',
     userSelect: 'none',
     filter: 'var(--logo-filter)',
     transition: 'filter 0.2s',
   },
   byline: {
-    fontSize: 9,
+    fontSize: 'var(--fs-9)',
     color: 'var(--text-muted)',
     letterSpacing: '0.08em',
     fontFamily: 'var(--font-mono)',
@@ -52,15 +90,39 @@ const s = {
     userSelect: 'none',
     marginLeft: 4,
   },
-  right: { display: 'flex', gap: 8, alignItems: 'center' },
+  right: {
+    display: 'flex',
+    gap: 8,
+    alignItems: 'center',
+    WebkitAppRegion: 'no-drag',
+  },
   loadingLabel: {
-    fontSize: 9,
+    fontSize: 'var(--fs-9)',
     color: 'var(--text-muted)',
     letterSpacing: '0.1em',
     fontFamily: 'var(--font-mono)',
   },
+  helpBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: '50%',
+    background: 'transparent',
+    border: '1.5px solid var(--accent)',
+    color: 'var(--accent)',
+    fontSize: 'var(--fs-13)',
+    fontWeight: 700,
+    fontFamily: 'var(--font-mono)',
+    cursor: 'pointer',
+    lineHeight: 1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    transition: 'background 0.12s, color 0.12s',
+    letterSpacing: 0,
+  },
   gearBtn: {
-    fontSize: 14,
+    fontSize: 'var(--fs-14)',
     color: 'var(--text-muted)',
     background: 'transparent',
     border: '0.5px solid var(--border-mid)',
@@ -69,5 +131,29 @@ const s = {
     cursor: 'pointer',
     transition: 'color 0.1s, border-color 0.1s',
     lineHeight: 1,
+  },
+  winControls: {
+    display: 'flex',
+    gap: 2,
+    marginLeft: 6,
+    paddingLeft: 10,
+    borderLeft: '0.5px solid var(--border-subtle)',
+  },
+  winBtn: {
+    width: 28,
+    height: 28,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'transparent',
+    border: '0.5px solid transparent',
+    borderRadius: 'var(--radius-sm)',
+    color: 'var(--text-muted)',
+    fontSize: 'var(--fs-11)',
+    cursor: 'pointer',
+    transition: 'background 0.1s, color 0.1s, border-color 0.1s',
+    lineHeight: 1,
+    fontFamily: 'var(--font-mono)',
+    flexShrink: 0,
   },
 }

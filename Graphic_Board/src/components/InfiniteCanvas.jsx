@@ -5,6 +5,7 @@ const GAP     = 14
 const MIN_W   = 60
 const ROW_H   = 240
 const MAX_ROW = 1300
+const VIDEO_RE = /\.(mp4|webm|mov|m4v|ogg|ogv|avi|mkv)$/i
 
 // ── auto-layout ──────────────────────────────────────────────────────────────
 function autoLayout(images, aspects, startY = GAP) {
@@ -21,7 +22,7 @@ function autoLayout(images, aspects, startY = GAP) {
       x = GAP; y += h + GAP; rowW = 0
     }
 
-    items.push({ id: img.id, type: 'image', x, y, w, h, name: img.name })
+    items.push({ id: img.id, type: img.mediaType === 'video' ? 'video' : 'image', x, y, w, h, name: img.name })
     x += w + GAP; rowW += w + GAP
   })
   return items
@@ -39,6 +40,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
   const [ctxMenu,     setCtxMenu]     = useState(null)
   const [undoCount,   setUndoCount]   = useState(0)
   const [canvasCxMenu, setCanvasCxMenu] = useState(null)  // { x, y } for background right-click
+  const [volume,      setVolume]      = useState(1)
 
   const panRef       = useRef(pan)
   const zoomRef      = useRef(zoom)
@@ -94,10 +96,17 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
         if (r.status !== 'fulfilled') return Promise.resolve()
         const { img, url } = r.value
         return new Promise(resolve => {
-          const el = new Image()
-          el.onload  = () => { aspects[img.name] = el.naturalWidth / el.naturalHeight; resolve() }
-          el.onerror = () => { aspects[img.name] = 1; resolve() }
-          el.src = url
+          if (img.mediaType === 'video') {
+            const v = document.createElement('video')
+            v.onloadedmetadata = () => { aspects[img.name] = v.videoWidth / v.videoHeight || 16/9; resolve() }
+            v.onerror = () => { aspects[img.name] = 16/9; resolve() }
+            v.src = url
+          } else {
+            const el = new Image()
+            el.onload  = () => { aspects[img.name] = el.naturalWidth / el.naturalHeight; resolve() }
+            el.onerror = () => { aspects[img.name] = 1; resolve() }
+            el.src = url
+          }
         })
       }))
 
@@ -143,37 +152,49 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
     return () => window.removeEventListener('mousedown', onDown)
   }, [ctxMenu])
 
-  // ── wheel: pinch=zoom, two-finger-scroll=pan (non-passive) ──────────────
+  // ── wheel: trackpad=pan, mouse-wheel=zoom, pinch/ctrl=zoom ─────────────
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     function onWheel(e) {
       e.preventDefault()
-      if (e.ctrlKey) {
-        // Pinch gesture or Ctrl+scroll → zoom toward cursor
-        const factor  = e.deltaY < 0 ? 1.08 : 0.93
-        const newZoom = Math.max(0.05, Math.min(10, zoomRef.current * factor))
-        const rect    = el.getBoundingClientRect()
-        const mx = e.clientX - rect.left
-        const my = e.clientY - rect.top
+
+      // Detect trackpad vs mouse wheel:
+      // - deltaMode !== 0 (LINE/PAGE) → definitely a mouse wheel → zoom
+      // - ctrlKey → pinch gesture (OS synthesises ctrlKey for pinch) → zoom
+      // - deltaMode === 0 AND has horizontal component → trackpad 2D scroll → pan
+      // - deltaMode === 0, no ctrlKey, small delta (< 40) → trackpad fine scroll → pan
+      // - deltaMode === 0, no ctrlKey, large delta (≥ 40) → smooth-scroll mouse → zoom
+      const isTrackpadPan = e.deltaMode === 0 && !e.ctrlKey &&
+        (Math.abs(e.deltaX) > 0 || Math.abs(e.deltaY) < 40)
+
+      if (isTrackpadPan) {
         const newPan = {
-          x: mx - (mx - panRef.current.x) * (newZoom / zoomRef.current),
-          y: my - (my - panRef.current.y) * (newZoom / zoomRef.current),
-        }
-        panRef.current  = newPan
-        zoomRef.current = newZoom
-        setPan(newPan)
-        setZoom(newZoom)
-      } else {
-        // Two-finger scroll → pan
-        const mult   = e.deltaMode === 0 ? 1 : e.deltaMode === 1 ? 30 : 300
-        const newPan = {
-          x: panRef.current.x - e.deltaX * mult,
-          y: panRef.current.y - e.deltaY * mult,
+          x: panRef.current.x - e.deltaX,
+          y: panRef.current.y - e.deltaY,
         }
         panRef.current = newPan
         setPan(newPan)
+        scheduleSave()
+        return
       }
+
+      // Mouse wheel (deltaMode≠0) or smooth-scroll mouse (large pixel delta) or pinch → zoom
+      const mult    = e.deltaMode === 1 ? 30 : e.deltaMode === 2 ? 300 : 1
+      const dy      = e.deltaY * mult
+      const factor  = dy < 0 ? 1.08 : 0.93
+      const newZoom = Math.max(0.05, Math.min(10, zoomRef.current * factor))
+      const rect    = el.getBoundingClientRect()
+      const mx      = e.clientX - rect.left
+      const my      = e.clientY - rect.top
+      const newPan  = {
+        x: mx - (mx - panRef.current.x) * (newZoom / zoomRef.current),
+        y: my - (my - panRef.current.y) * (newZoom / zoomRef.current),
+      }
+      panRef.current  = newPan
+      zoomRef.current = newZoom
+      setPan(newPan)
+      setZoom(newZoom)
       scheduleSave()
     }
     el.addEventListener('wheel', onWheel, { passive: false })
@@ -453,7 +474,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
   // ── reset: pan/zoom to default + restore any deleted images ──────────────
   function resetView() {
     pushUndo()
-    const existingIds = new Set((items || []).filter(it => it.type === 'image').map(it => it.id))
+    const existingIds = new Set((items || []).filter(it => it.type === 'image' || it.type === 'video').map(it => it.id))
     const missing = images.filter(img => !existingIds.has(img.id))
     if (missing.length > 0) {
       const maxY = (items || []).length > 0
@@ -488,11 +509,19 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
       urlMapRef.current[name] = url
       newUrls[name] = url
 
+      const isVideo = file.type.startsWith('video/') || VIDEO_RE.test(name)
       const aspect = await new Promise(resolve => {
-        const el = new Image()
-        el.onload  = () => resolve(el.naturalWidth / el.naturalHeight)
-        el.onerror = () => resolve(1)
-        el.src = url
+        if (isVideo) {
+          const v = document.createElement('video')
+          v.onloadedmetadata = () => resolve(v.videoWidth / v.videoHeight || 16/9)
+          v.onerror = () => resolve(16/9)
+          v.src = url
+        } else {
+          const el = new Image()
+          el.onload  = () => resolve(el.naturalWidth / el.naturalHeight)
+          el.onerror = () => resolve(1)
+          el.src = url
+        }
       })
       aspectsRef.current[name] = aspect
 
@@ -503,7 +532,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
         layoutY += h + GAP
         rowW = 0
       }
-      newItems.push({ id: name, type: 'image', x: layoutX + rowW, y: layoutY, w, h, name })
+      newItems.push({ id: name, type: isVideo ? 'video' : 'image', x: layoutX + rowW, y: layoutY, w, h, name })
       rowW += w + GAP
     }
 
@@ -528,7 +557,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
   // ── restore deleted: add missing images below existing content ────────────
   function restoreDeleted() {
     if (!items) return
-    const existingIds = new Set(items.filter(it => it.type === 'image').map(it => it.id))
+    const existingIds = new Set(items.filter(it => it.type === 'image' || it.type === 'video').map(it => it.id))
     const missing = images.filter(img => !existingIds.has(img.id))
     if (missing.length === 0) return
     pushUndo()
@@ -572,7 +601,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
 
   // ── render ────────────────────────────────────────────────────────────────
   const deletedCount = items
-    ? images.filter(img => !items.some(it => it.type === 'image' && it.id === img.id)).length
+    ? images.filter(img => !items.some(it => (it.type === 'image' || it.type === 'video') && it.id === img.id)).length
     : 0
 
   return (
@@ -604,6 +633,18 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
                   url={imageUrls[item.name]}
                   isSelected={selected.has(item.id)}
                   canResize={selected.size <= 1}
+                  onMouseDown={startItemMove}
+                  onResizeStart={startResize}
+                  onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, id: item.id, type: 'image', name: item.name }) }}
+                />
+              : item.type === 'video'
+              ? <VideoItem
+                  key={item.id}
+                  item={item}
+                  url={imageUrls[item.name]}
+                  isSelected={selected.has(item.id)}
+                  canResize={selected.size <= 1}
+                  volume={volume}
                   onMouseDown={startItemMove}
                   onResizeStart={startResize}
                   onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, id: item.id, type: 'image', name: item.name }) }}
@@ -693,6 +734,17 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
                 restore ({deletedCount})
               </button>
             )}
+            <span style={s.hudDot}>·</span>
+            <span style={{ ...s.hudZoom, minWidth: 'unset', cursor: 'pointer' }} onClick={() => setVolume(v => v > 0 ? 0 : 1)} title="mute/unmute">
+              {volume === 0 ? '🔇' : volume < 0.5 ? '🔉' : '🔊'}
+            </span>
+            <input
+              type="range" min="0" max="1" step="0.02"
+              value={volume}
+              onChange={e => setVolume(Number(e.target.value))}
+              style={s.volSlider}
+              title={`volume: ${Math.round(volume * 100)}%`}
+            />
           </div>
 
           {images.length === 0 && (
@@ -721,6 +773,71 @@ function ImageItem({ item, url, isSelected, canResize, onMouseDown, onResizeStar
         ? <img src={url} alt={item.name} style={s.img} draggable={false} />
         : <div style={s.imgPlaceholder} />
       }
+      {isSelected && canResize && (
+        <div style={s.resizeHandle} onMouseDown={e => onResizeStart(e, item)} />
+      )}
+    </div>
+  )
+}
+
+// ── video item ────────────────────────────────────────────────────────────────
+function VideoItem({ item, url, isSelected, canResize, volume, onMouseDown, onResizeStart, onContextMenu }) {
+  const videoRef           = useRef()
+  const [playing, setPlaying] = useState(false)
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.volume = volume ?? 1
+  }, [volume])
+
+  function togglePlay(e) {
+    e.stopPropagation()
+    const v = videoRef.current
+    if (!v) return
+    if (v.paused) { v.play(); setPlaying(true) }
+    else          { v.pause(); setPlaying(false) }
+  }
+
+  return (
+    <div
+      style={{
+        ...s.item,
+        left: item.x, top: item.y, width: item.w, height: item.h,
+        outline: isSelected ? '1.5px solid var(--accent)' : '1px solid rgba(255,255,255,0.07)',
+        cursor: 'grab',
+        background: '#000',
+      }}
+      onMouseDown={e => onMouseDown(e, item)}
+      onContextMenu={onContextMenu}
+    >
+      {url ? (
+        <>
+          <video
+            ref={videoRef}
+            src={url}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', pointerEvents: 'none' }}
+            loop
+            playsInline
+          />
+          {/* Play/pause overlay — stopPropagation prevents drag on click */}
+          <div
+            style={{
+              position: 'absolute', inset: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: playing ? 'transparent' : 'rgba(0,0,0,0.28)',
+              cursor: 'pointer',
+              transition: 'background 0.18s',
+            }}
+            onMouseDown={e => e.stopPropagation()}
+            onClick={togglePlay}
+          >
+            {!playing && (
+              <div style={s.videoPlayBtn}>▶</div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, color: 'rgba(255,255,255,0.2)' }}>▶</div>
+      )}
       {isSelected && canResize && (
         <div style={s.resizeHandle} onMouseDown={e => onResizeStart(e, item)} />
       )}
@@ -821,6 +938,15 @@ const s = {
     fontFamily: 'var(--font-mono)',
     lineHeight: 1.55, wordBreak: 'break-word',
   },
+  videoPlayBtn: {
+    width: 44, height: 44, borderRadius: '50%',
+    background: 'rgba(255,255,255,0.12)',
+    border: '1.5px solid rgba(255,255,255,0.28)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 15, color: 'rgba(255,255,255,0.85)',
+    paddingLeft: 3,
+    pointerEvents: 'none',
+  },
   resizeHandle: {
     position: 'absolute', right: 3, bottom: 3,
     width: 10, height: 10,
@@ -880,6 +1006,7 @@ const s = {
     letterSpacing: '0.05em', fontFamily: 'var(--font-mono)',
   },
   hudHint: { color: 'var(--text-muted)', fontSize: 9, letterSpacing: '0.05em' },
+  volSlider: { width: 72, accentColor: 'var(--accent)', cursor: 'pointer', verticalAlign: 'middle' },
   emptyHint: {
     position: 'absolute', top: '50%', left: '50%',
     transform: 'translate(-50%, -50%)',
