@@ -6,7 +6,7 @@
  * than new Image(). bitmap.close() explicitly releases the decoded pixels
  * after the canvas draw, so only the small JPEG blob stays in memory.
  */
-export async function createThumbnail(fileHandle, maxWidth = 300, quality = 0.75) {
+export async function createThumbnail(fileHandle, maxWidth = 220, quality = 0.65) {
   const file = await fileHandle.getFile()
   const bitmap = await createImageBitmap(file)
 

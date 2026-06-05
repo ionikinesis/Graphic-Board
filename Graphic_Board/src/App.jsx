@@ -14,6 +14,7 @@ import { useAppSettings } from './hooks/useAppSettings.js'
 import { useConfigFile } from './hooks/useConfigFile.js'
 import { copyFile, moveFile, copyFolder, moveFolder } from './utils/fileOps.js'
 import { writeFilesToDir, getImageFiles } from './utils/fileImport.js'
+import { openBoard } from './utils/platform.js'
 import FolderPicker from './components/FolderPicker.jsx'
 import HelpModal from './components/HelpModal.jsx'
 
@@ -273,8 +274,8 @@ export default function App() {
   function handleNavigateInto(folder) {
     const pk = [...(rootHandle ? [rootHandle.name] : []), ...stack.map(s => s.name), folder.name].join('/')
     if (folderMeta.getFolderMode(pk) === 'board') {
-      const winName = 'board_' + encodeURIComponent(pk)
-      window.open(`/?board&path=${encodeURIComponent(pk)}`, winName)
+      const lastSegment = pk.split('/').pop()
+      openBoard(pk, lastSegment)
       return
     }
     folderMeta.touchFolder(pk)
@@ -297,6 +298,7 @@ export default function App() {
   if (rootStatus === 'loading' || (rootStatus === 'ready' && !configReady)) {
     return (
       <div style={styles.app}>
+        <Topbar />
         <div style={styles.bootScreen}><div style={styles.bootText}>loading...</div></div>
       </div>
     )
@@ -305,8 +307,31 @@ export default function App() {
   if (rootStatus === 'none' || rootStatus === 'needs-permission') {
     return (
       <div style={styles.app}>
+        <Topbar onOpenSettings={() => setSettingsOpen(true)} onOpenHelp={() => setHelpOpen(true)} />
         <SetupScreen status={rootStatus} rootName={rootName} onChoose={chooseRoot} onGrant={grantPermission} onOpenHelp={() => setHelpOpen(true)} />
         {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
+        {settingsOpen && (
+          <SettingsModal
+            roots={roots}
+            activeRootId={activeRootId}
+            onAddRoot={async () => { await addRoot() }}
+            onRemoveRoot={removeRoot}
+            onSwitchRoot={id => { switchRoot(id); setSettingsOpen(false) }}
+            onClose={() => setSettingsOpen(false)}
+            scale={settings.scale}
+            onSetScale={scale => updateSettings({ scale })}
+            textScale={settings.textScale ?? 1.0}
+            onSetTextScale={textScale => updateSettings({ textScale })}
+            currentTheme={settings.theme}
+            onSetTheme={theme => updateSettings({ theme })}
+            customColors={customColors}
+            onSetCustomColors={updateCustomColors}
+            onSetRootAbsPath={setRootAbsPath}
+            tagManager={folderMeta}
+            highContrast={settings.highContrast ?? false}
+            onSetHighContrast={v => updateSettings({ highContrast: v })}
+          />
+        )}
       </div>
     )
   }

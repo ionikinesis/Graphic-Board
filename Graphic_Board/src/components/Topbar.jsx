@@ -1,32 +1,43 @@
 import React, { useState } from 'react'
+import logo from '../../images/logo.png'
 
 async function tauriCmd(method) {
+  if (!window.__TAURI__) return
   try {
-    const w = window.__TAURI__?.window
-    if (!w) return
-    const win = typeof w.getCurrentWindow === 'function' ? w.getCurrentWindow() : w.appWindow
-    await win[method]()
-  } catch {}
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    await getCurrentWindow()[method]()
+  } catch (e) {
+    console.error('[tauriCmd]', method, e)
+  }
+}
+
+async function tauriToggleMaximize() {
+  if (!window.__TAURI__) return
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    const win = getCurrentWindow()
+    const maximized = await win.isMaximized()
+    if (maximized) await win.unmaximize()
+    else           await win.maximize()
+  } catch (e) {
+    console.error('[tauriToggleMaximize]', e)
+  }
 }
 
 export default function Topbar({ onOpenSettings, onOpenHelp, onNavigateHome, loading }) {
   return (
     <header style={s.topbar}>
       <div style={s.logoWrap} onClick={onNavigateHome} title="home">
-        <img src="/images/logo.png" alt="Graphic Board" style={s.logoImg} />
+        <img src={logo} alt="Graphic Board" style={s.logoImg} />
         <span style={s.byline}>by Riku Yuki Darroch</span>
       </div>
       <div style={s.right}>
         {loading && <span style={s.loadingLabel}>loading...</span>}
-        <button style={s.helpBtn} onClick={onOpenHelp} title="help">
-          ?
-        </button>
-        <button style={s.gearBtn} onClick={onOpenSettings} title="settings">
-          ⚙
-        </button>
+        {onOpenHelp     && <button style={s.helpBtn} onClick={onOpenHelp}     title="help">?</button>}
+        {onOpenSettings && <button style={s.gearBtn} onClick={onOpenSettings} title="settings">⚙</button>}
         <div style={s.winControls}>
           <WinBtn title="minimize" onClick={() => tauriCmd('minimize')}>─</WinBtn>
-          <WinBtn title="maximize" onClick={() => tauriCmd('maximize')}>□</WinBtn>
+          <WinBtn title="maximize" onClick={tauriToggleMaximize}>□</WinBtn>
           <WinBtn title="close"    onClick={() => tauriCmd('close')} close>✕</WinBtn>
         </div>
       </div>
@@ -155,5 +166,6 @@ const s = {
     lineHeight: 1,
     fontFamily: 'var(--font-mono)',
     flexShrink: 0,
+    WebkitAppRegion: 'no-drag',
   },
 }

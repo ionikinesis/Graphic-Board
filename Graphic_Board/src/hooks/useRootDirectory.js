@@ -79,36 +79,31 @@ export function useRootDirectory() {
   }, [])
 
   async function addRoot() {
+    // showDirectoryPicker works in both the browser and Tauri's WebView2 (Chromium).
+    // The previous Tauri-specific path called plugin-dialog first, which consumed the
+    // user-gesture token before showDirectoryPicker could use it, causing it to fail.
+    // Using showDirectoryPicker directly avoids that ordering issue.
+    // Abs path for "Show in Explorer" can be set manually in Settings.
     if (!window.showDirectoryPicker) return false
-
-    // In Tauri: capture the absolute path via the native dialog first.
-    // This is a two-dialog flow until the app is fully ported to Tauri FS.
-    let absPath = null
-    if (window.__TAURI__) {
-      try {
-        const p = await window.__TAURI__.dialog?.open?.({ directory: true, multiple: false })
-        if (typeof p === 'string') absPath = p
-        else return false // user cancelled Tauri dialog
-      } catch {}
-    }
-
+    let handle
     try {
-      const handle = await window.showDirectoryPicker({ mode: 'readwrite' })
-      const id     = Date.now().toString()
-      const name   = handle.name
-      await dbSet(STORE, `root_${id}`, handle)
-      const meta = loadMeta()
-      meta.push({ id, name, ...(absPath && { absPath }) })
-      saveMeta(meta)
-      const newRoot = { id, name, absPath, handle, status: 'ready' }
-      setRoots(prev => [...prev, newRoot])
-      setActiveRootId(id)
-      localStorage.setItem(ACTIVE_KEY, id)
-      return true
+      handle = await window.showDirectoryPicker({ mode: 'readwrite' })
     } catch (err) {
       if (err.name !== 'AbortError') throw err
       return false
     }
+
+    const id   = Date.now().toString()
+    const name = handle.name
+    await dbSet(STORE, `root_${id}`, handle)
+    const meta = loadMeta()
+    meta.push({ id, name })
+    saveMeta(meta)
+    const newRoot = { id, name, absPath: null, handle, status: 'ready' }
+    setRoots(prev => [...prev, newRoot])
+    setActiveRootId(id)
+    localStorage.setItem(ACTIVE_KEY, id)
+    return true
   }
 
   function setRootAbsPath(id, path) {

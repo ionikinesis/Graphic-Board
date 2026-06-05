@@ -35,6 +35,10 @@ export function useLibrary() {
 
   // Import a top-level folder. Subfolders become children. Images in subfolders are loaded.
   const importFolder = useCallback(async () => {
+    if (window.__TAURI__) {
+      setError('Folder import is not yet supported in the packaged build.');
+      return;
+    }
     if (!window.showDirectoryPicker) {
       setError('File System Access API not supported in this browser. Please use Chrome or Edge.');
       return;

@@ -3,6 +3,7 @@ import { dbGet } from './utils/db.js'
 import { readBoardFile, writeBoardFile } from './utils/boardFile.js'
 import { themes, DEFAULT_THEME, generateCustomTheme } from './utils/themes.js'
 import InfiniteCanvas from './components/InfiniteCanvas.jsx'
+import Topbar from './components/Topbar.jsx'
 
 const IMAGE_RE = /\.(jpe?g|png|gif|webp|avif|bmp|tiff?|svg)$/i
 const VIDEO_RE = /\.(mp4|webm|mov|m4v|ogg|ogv|avi|mkv)$/i
@@ -112,28 +113,43 @@ export default function BoardView() {
     return () => clearTimeout(saveTimerRef.current)
   }, [])
 
-  if (status === 'loading') return <Screen text="loading…" />
-  if (status === 'no-root')  return <Screen text="no root folder — open the main window first" />
-  if (status === 'not-found') return <Screen text="folder not found" />
+  const folderName = FOLDER_PATH.split('/').filter(Boolean).pop() || 'board'
+
+  if (status === 'loading')   return <Shell name={folderName}><Screen text="loading…" /></Shell>
+  if (status === 'no-root')   return <Shell name={folderName}><Screen text="no root folder — open the main window first" /></Shell>
+  if (status === 'not-found') return <Shell name={folderName}><Screen text="folder not found" /></Shell>
   if (status === 'needs-permission') {
     return (
-      <Screen>
-        <div style={s.permText}>grant access to your files to open this board</div>
-        <button style={s.permBtn} onClick={grantPermission}>grant access</button>
-      </Screen>
+      <Shell name={folderName}>
+        <Screen>
+          <div style={s.permText}>grant access to your files to open this board</div>
+          <button style={s.permBtn} onClick={grantPermission}>grant access</button>
+        </Screen>
+      </Shell>
     )
   }
 
   const saved = boardData?.boards?.[FOLDER_PATH] ?? null
 
   return (
-    <InfiniteCanvas
-      images={images}
-      dirHandle={dirHandle}
-      savedItems={saved?.items ?? null}
-      savedViewport={saved?.viewport ?? null}
-      onSave={handleSave}
-    />
+    <Shell name={folderName}>
+      <InfiniteCanvas
+        images={images}
+        dirHandle={dirHandle}
+        savedItems={saved?.items ?? null}
+        savedViewport={saved?.viewport ?? null}
+        onSave={handleSave}
+      />
+    </Shell>
+  )
+}
+
+function Shell({ name, children }) {
+  return (
+    <div style={s.shell}>
+      <Topbar />
+      <div style={s.canvasArea}>{children}</div>
+    </div>
   )
 }
 
@@ -147,9 +163,17 @@ function Screen({ text, children }) {
 }
 
 const s = {
+  shell: {
+    display: 'flex', flexDirection: 'column',
+    height: '100vh', width: '100vw', overflow: 'hidden',
+    background: 'var(--bg-base)',
+  },
+  canvasArea: {
+    flex: 1, minHeight: 0, position: 'relative',
+  },
   screen: {
     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    height: '100vh', width: '100vw',
+    height: '100%', width: '100%',
     background: 'var(--bg-base)', gap: 16,
   },
   screenText: { fontSize: 12, color: 'var(--text-muted)', letterSpacing: '0.1em' },

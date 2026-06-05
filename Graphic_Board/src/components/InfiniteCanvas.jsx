@@ -39,8 +39,9 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
   const [marquee,     setMarquee]     = useState(null)
   const [ctxMenu,     setCtxMenu]     = useState(null)
   const [undoCount,   setUndoCount]   = useState(0)
-  const [canvasCxMenu, setCanvasCxMenu] = useState(null)  // { x, y } for background right-click
+  const [canvasCxMenu, setCanvasCxMenu] = useState(null)
   const [volume,      setVolume]      = useState(1)
+  const [pauseAllTick, setPauseAllTick] = useState(0)
 
   const panRef       = useRef(pan)
   const zoomRef      = useRef(zoom)
@@ -53,11 +54,49 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
   const containerRef = useRef()
   const ctxMenuRef   = useRef()
   const saveTimerRef = useRef()
+  const worldRef     = useRef()
+  const prevViewRef  = useRef(null)   // { pan, zoom } saved before a zoom-to-item
 
   useEffect(() => { panRef.current      = pan      }, [pan])
   useEffect(() => { zoomRef.current     = zoom     }, [zoom])
   useEffect(() => { itemsRef.current    = items    }, [items])
   useEffect(() => { selectedRef.current = selected }, [selected])
+
+  // ── zoom-to-item ──────────────────────────────────────────────────────────
+  // Set a CSS transition directly on the DOM element so the animation fires
+  // reliably before React re-renders the transform.
+  const animateTo = useCallback((newPan, newZoom) => {
+    const el = worldRef.current
+    if (el) el.style.transition = 'transform 0.32s cubic-bezier(0.4,0,0.2,1)'
+    panRef.current  = newPan
+    zoomRef.current = newZoom
+    setPan(newPan)
+    setZoom(newZoom)
+    setTimeout(() => { if (worldRef.current) worldRef.current.style.transition = '' }, 350)
+  }, [])
+
+  const zoomOut = useCallback(() => {
+    if (!prevViewRef.current) return
+    const { pan, zoom } = prevViewRef.current
+    prevViewRef.current = null
+    animateTo(pan, zoom)
+  }, [animateTo])
+
+  function zoomToItem(item) {
+    if (!containerRef.current) return
+    if (!prevViewRef.current) {
+      prevViewRef.current = { pan: { ...panRef.current }, zoom: zoomRef.current }
+    }
+    const cW  = containerRef.current.clientWidth
+    const cH  = containerRef.current.clientHeight
+    const pad = 24
+    const newZoom = Math.min((cW - pad * 2) / item.w, (cH - pad * 2) / item.h, 8)
+    const newPan  = {
+      x: cW / 2 - (item.x + item.w / 2) * newZoom,
+      y: cH / 2 - (item.y + item.h / 2) * newZoom,
+    }
+    animateTo(newPan, newZoom)
+  }
 
   // ── undo helpers ──────────────────────────────────────────────────────────
   const pushUndo = useCallback(() => {
@@ -112,7 +151,32 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
 
       if (!mounted) return
       aspectsRef.current = aspects
-      setItems(savedItems ?? autoLayout(images, aspects))
+      const currentItems = savedItems ?? autoLayout(images, aspects)
+      setItems(currentItems)
+
+      // Fit all items into view on open so nothing is off-screen, regardless of
+      // any saved viewport (which may have been set at a different window size or
+      // while content was positioned far from the visible area).
+      if (currentItems.length > 0 && containerRef.current) {
+        const pad  = 60
+        const minX = Math.min(...currentItems.map(it => it.x))
+        const minY = Math.min(...currentItems.map(it => it.y))
+        const maxX = Math.max(...currentItems.map(it => it.x + (it.w || 200)))
+        const maxY = Math.max(...currentItems.map(it => it.y + (it.h || it.w || 200)))
+        const cW   = containerRef.current.clientWidth  - pad * 2
+        const cH   = containerRef.current.clientHeight - pad * 2
+        if (cW > 0 && cH > 0 && maxX > minX && maxY > minY) {
+          const newZ = Math.min(cW / (maxX - minX), cH / (maxY - minY), 2)
+          const newP = {
+            x: pad + (cW - (maxX - minX) * newZ) / 2 - minX * newZ,
+            y: pad + (cH - (maxY - minY) * newZ) / 2 - minY * newZ,
+          }
+          panRef.current  = newP
+          zoomRef.current = newZ
+          setPan(newP)
+          setZoom(newZ)
+        }
+      }
     }
 
     run()
@@ -248,7 +312,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
           if (!start) return it
           const scaledW = Math.max(MIN_W, start.w * ratio)
           const scaledH = start.aspect ? Math.round(scaledW / start.aspect) : Math.round(start.h * ratio)
-          const base = it.type === 'image'
+          const base = (it.type === 'image' || it.type === 'video')
             ? { ...it, w: scaledW, h: scaledH }
             : { ...it, w: scaledW }
           if (multi) {
@@ -324,11 +388,14 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
         setSelected(new Set())
         scheduleSave()
       }
-      if (e.key === 'Escape') setSelected(new Set())
+      if (e.key === 'Escape') {
+        if (prevViewRef.current) { zoomOut(); return }
+        setSelected(new Set())
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [editingText, scheduleSave, undo, pushUndo])
+  }, [editingText, scheduleSave, undo, pushUndo, zoomOut])
 
   // ── container mouse handlers ──────────────────────────────────────────────
   function onContainerMouseDown(e) {
@@ -371,6 +438,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
 
   function onContainerDoubleClick(e) {
     if (e.target !== containerRef.current && !e.target.classList?.contains('canvas-world')) return
+    if (prevViewRef.current) { zoomOut(); return }
     const wp = screenToWorld(e.clientX, e.clientY)
     const id  = `text-${Date.now()}`
     const box = { id, type: 'text', x: wp.x - 100, y: wp.y - 16, w: 200, text: '', fontSize: 14 }
@@ -421,7 +489,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
     pushUndo()
     const allStarts = {}
     si.forEach(it => {
-      allStarts[it.id] = { x: it.x, y: it.y, w: it.w, h: it.h, aspect: it.type === 'image' && it.h ? it.w / it.h : null }
+      allStarts[it.id] = { x: it.x, y: it.y, w: it.w, h: it.h, aspect: (it.type === 'image' || it.type === 'video') && it.h ? it.w / it.h : null }
     })
     dragRef.current = { type: 'resize', id: null, startMouseX: e.clientX, startW, allStarts, groupX: gX, groupY: gY }
   }
@@ -443,7 +511,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
     selItems.forEach(it => {
       allStarts[it.id] = {
         x: it.x, y: it.y, w: it.w, h: it.h,
-        aspect: it.type === 'image' && it.h ? it.w / it.h : null,
+        aspect: (it.type === 'image' || it.type === 'video') && it.h ? it.w / it.h : null,
       }
     })
 
@@ -623,6 +691,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
         <>
           {/* World */}
           <div
+            ref={worldRef}
             className="canvas-world"
             style={{ ...s.world, transform: `translate(${pan.x}px,${pan.y}px) scale(${zoom})` }}
           >
@@ -635,6 +704,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
                   canResize={selected.size <= 1}
                   onMouseDown={startItemMove}
                   onResizeStart={startResize}
+                  onDoubleClick={zoomToItem}
                   onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, id: item.id, type: 'image', name: item.name }) }}
                 />
               : item.type === 'video'
@@ -645,8 +715,10 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
                   isSelected={selected.has(item.id)}
                   canResize={selected.size <= 1}
                   volume={volume}
+                  pauseAllTick={pauseAllTick}
                   onMouseDown={startItemMove}
                   onResizeStart={startResize}
+                  onDoubleClick={zoomToItem}
                   onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setCtxMenu({ x: e.clientX, y: e.clientY, id: item.id, type: 'image', name: item.name }) }}
                 />
               : <TextItem
@@ -745,6 +817,10 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
               style={s.volSlider}
               title={`volume: ${Math.round(volume * 100)}%`}
             />
+            <span style={s.hudDot}>·</span>
+            <button style={s.hudBtn} onClick={() => setPauseAllTick(t => t + 1)} title="pause all playing videos">
+              stop all videos
+            </button>
           </div>
 
           {images.length === 0 && (
@@ -757,7 +833,7 @@ export default function InfiniteCanvas({ images, dirHandle, savedItems, savedVie
 }
 
 // ── image item ────────────────────────────────────────────────────────────────
-function ImageItem({ item, url, isSelected, canResize, onMouseDown, onResizeStart, onContextMenu }) {
+function ImageItem({ item, url, isSelected, canResize, onMouseDown, onResizeStart, onDoubleClick, onContextMenu }) {
   return (
     <div
       style={{
@@ -767,6 +843,7 @@ function ImageItem({ item, url, isSelected, canResize, onMouseDown, onResizeStar
         cursor: 'grab',
       }}
       onMouseDown={e => onMouseDown(e, item)}
+      onDoubleClick={e => { e.stopPropagation(); onDoubleClick?.(item) }}
       onContextMenu={onContextMenu}
     >
       {url
@@ -781,13 +858,19 @@ function ImageItem({ item, url, isSelected, canResize, onMouseDown, onResizeStar
 }
 
 // ── video item ────────────────────────────────────────────────────────────────
-function VideoItem({ item, url, isSelected, canResize, volume, onMouseDown, onResizeStart, onContextMenu }) {
-  const videoRef           = useRef()
+function VideoItem({ item, url, isSelected, canResize, volume, pauseAllTick, onMouseDown, onResizeStart, onDoubleClick, onContextMenu }) {
+  const videoRef              = useRef()
   const [playing, setPlaying] = useState(false)
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.volume = volume ?? 1
   }, [volume])
+
+  useEffect(() => {
+    if (!pauseAllTick) return
+    videoRef.current?.pause()
+    setPlaying(false)
+  }, [pauseAllTick])
 
   function togglePlay(e) {
     e.stopPropagation()
@@ -807,6 +890,7 @@ function VideoItem({ item, url, isSelected, canResize, volume, onMouseDown, onRe
         background: '#000',
       }}
       onMouseDown={e => onMouseDown(e, item)}
+      onDoubleClick={e => { e.stopPropagation(); onDoubleClick?.(item) }}
       onContextMenu={onContextMenu}
     >
       {url ? (
@@ -818,21 +902,16 @@ function VideoItem({ item, url, isSelected, canResize, volume, onMouseDown, onRe
             loop
             playsInline
           />
-          {/* Play/pause overlay — stopPropagation prevents drag on click */}
-          <div
-            style={{
-              position: 'absolute', inset: 0,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: playing ? 'transparent' : 'rgba(0,0,0,0.28)',
-              cursor: 'pointer',
-              transition: 'background 0.18s',
-            }}
-            onMouseDown={e => e.stopPropagation()}
-            onClick={togglePlay}
-          >
-            {!playing && (
-              <div style={s.videoPlayBtn}>▶</div>
-            )}
+          {/* Non-interactive overlay — only the button itself is clickable */}
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', background: playing ? 'transparent' : 'rgba(0,0,0,0.28)', transition: 'background 0.18s' }}>
+            <div
+              style={{ ...s.videoPlayBtn, pointerEvents: 'auto', cursor: 'pointer' }}
+              onMouseDown={e => { e.stopPropagation(); e.preventDefault() }}
+              onDoubleClick={e => e.stopPropagation()}
+              onClick={togglePlay}
+            >
+              {playing ? '▌▌' : '▶'}
+            </div>
           </div>
         </>
       ) : (
@@ -893,7 +972,7 @@ function TextItem({ item, isSelected, canResize, isEditing, onMouseDown, onResiz
 // ── styles ────────────────────────────────────────────────────────────────────
 const s = {
   container: {
-    position: 'fixed', inset: 0,
+    position: 'absolute', inset: 0,
     overflow: 'hidden',
     background: 'var(--bg-deep)',
     userSelect: 'none',
@@ -939,13 +1018,13 @@ const s = {
     lineHeight: 1.55, wordBreak: 'break-word',
   },
   videoPlayBtn: {
-    width: 44, height: 44, borderRadius: '50%',
-    background: 'rgba(255,255,255,0.12)',
-    border: '1.5px solid rgba(255,255,255,0.28)',
+    width: 48, height: 48, borderRadius: '50%',
+    background: 'rgba(255,255,255,0.15)',
+    border: '1.5px solid rgba(255,255,255,0.35)',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: 15, color: 'rgba(255,255,255,0.85)',
-    paddingLeft: 3,
-    pointerEvents: 'none',
+    fontSize: 16, color: 'rgba(255,255,255,0.9)',
+    paddingLeft: 2,
+    transition: 'background 0.15s, opacity 0.15s',
   },
   resizeHandle: {
     position: 'absolute', right: 3, bottom: 3,

@@ -136,6 +136,14 @@ function RootRow({ root, isActive, onSwitch, onRemove, onSetAbsPath }) {
 
   function commitPath() { onSetAbsPath(pathDraft.trim() || null) }
 
+  async function browseForPath() {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({ directory: true, multiple: false })
+      if (selected && typeof selected === 'string') onSetAbsPath(selected)
+    } catch (e) { console.error('[browseForPath]', e) }
+  }
+
   return (
     <div>
       <div
@@ -154,16 +162,27 @@ function RootRow({ root, isActive, onSwitch, onRemove, onSetAbsPath }) {
         <button style={s.removeRootBtn} onClick={e => { e.stopPropagation(); onRemove() }} title="remove folder">×</button>
       </div>
       {isActive && (
-        <input
-          type="text"
-          value={pathDraft}
-          placeholder={root.absPath ? undefined : 'C:\\path\\to\\folder  (for Show in Explorer)'}
-          spellCheck={false}
-          style={s.absPathInput}
-          onChange={e => setPathDraft(e.target.value)}
-          onBlur={commitPath}
-          onKeyDown={e => { if (e.key === 'Enter') { commitPath(); e.target.blur() } }}
-        />
+        window.__TAURI__ ? (
+          <div style={s.absPathRow}>
+            <span style={{ ...s.absPathInput, flex: 1, lineHeight: '1.4', wordBreak: 'break-all', cursor: 'default', background: 'transparent', border: 'none', color: root.absPath ? 'var(--text-secondary)' : 'var(--text-muted)', fontStyle: root.absPath ? 'normal' : 'italic' }}>
+              {root.absPath || 'path not set — needed for Show in Explorer'}
+            </span>
+            <button style={s.browsePathBtn} onClick={browseForPath}>
+              {root.absPath ? 'change' : 'set path'}
+            </button>
+          </div>
+        ) : (
+          <input
+            type="text"
+            value={pathDraft}
+            placeholder={root.absPath ? undefined : 'C:\\path\\to\\folder  (for Show in Explorer)'}
+            spellCheck={false}
+            style={s.absPathInput}
+            onChange={e => setPathDraft(e.target.value)}
+            onBlur={commitPath}
+            onKeyDown={e => { if (e.key === 'Enter') { commitPath(); e.target.blur() } }}
+          />
+        )
       )}
     </div>
   )
@@ -477,6 +496,17 @@ const s = {
     background: 'var(--bg-base)', border: '0.5px solid var(--border-subtle)',
     borderRadius: 3, padding: '4px 8px',
     fontFamily: 'var(--font-mono)', letterSpacing: '0.04em', outline: 'none',
+  },
+  absPathRow: {
+    display: 'flex', alignItems: 'center', gap: 6, marginTop: 3,
+    padding: '4px 8px',
+    background: 'var(--bg-base)', border: '0.5px solid var(--border-subtle)', borderRadius: 3,
+  },
+  browsePathBtn: {
+    fontSize: 'var(--fs-10)', padding: '3px 9px', flexShrink: 0,
+    background: 'var(--accent)', color: 'var(--accent-text)',
+    border: 'none', borderRadius: 3, cursor: 'pointer',
+    fontFamily: 'var(--font-mono)', letterSpacing: '0.04em', fontWeight: 700,
   },
 
   // tag manager

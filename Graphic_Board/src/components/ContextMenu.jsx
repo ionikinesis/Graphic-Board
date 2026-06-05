@@ -8,8 +8,18 @@ export default function ContextMenu({ x, y, items, onClose }) {
   useLayoutEffect(() => {
     if (!ref.current) return
     const rect = ref.current.getBoundingClientRect()
-    const left = Math.max(8, Math.min(x, window.innerWidth  - rect.width  - 8))
-    const top  = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8))
+    const margin = 8
+
+    // Horizontal: open to the right of the cursor; flip left if it would overflow
+    let left = x
+    if (left + rect.width + margin > window.innerWidth) left = x - rect.width
+    left = Math.max(margin, left)
+
+    // Vertical: open below the cursor; flip above if it would overflow
+    let top = y
+    if (top + rect.height + margin > window.innerHeight) top = y - rect.height
+    top = Math.max(margin, top)
+
     setPos({ left, top })
   }, [])
 
@@ -368,6 +378,8 @@ const s = {
     boxShadow: '0 8px 28px rgba(0,0,0,0.75)',
     padding: '4px 0',
     minWidth: 210,
+    maxHeight: 'calc(100vh - 16px)',
+    overflowY: 'auto',
     userSelect: 'none',
   },
   item: {

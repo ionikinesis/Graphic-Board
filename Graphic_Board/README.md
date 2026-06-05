@@ -1,9 +1,15 @@
-# refboard
+# Graphic_Board
 
 A local reference image manager for digital artists. Browse your existing image folders with a visual grid interface — better thumbnails, favouriting, and cleaner navigation than Windows File Explorer.
 
 ## Setup
 
+Just run the installer found in \Graphic_Board\Graphic_Board\src-tauri\target\release\bundle\ 
+(Or I will just package it as an installable and submit that too if you want to test it)
+
+
+
+this is the old set up, I think I changed some code so I dont think it works any more but Ill leave it here. 
 ```bash
 cd Graphic_Board
 npm install
@@ -22,38 +28,6 @@ refboard uses the **File System Access API** to read folders directly from your 
 - Star images to add them to Favourites (persists between sessions)
 - Toggle between grid and large view
 
-## Browser support
-
-Requires Chrome or Edge. The File System Access API is not supported in Firefox or Safari.
-
-## Structure
-
-```
-src/
-  components/
-    Topbar.jsx        — top bar with logo and import button
-    Sidebar.jsx       — collection list
-    FolderGrid.jsx    — subfolder cards view
-    ImageGrid.jsx     — image grid view
-    ViewHeader.jsx    — breadcrumb and view toggle
-    EmptyState.jsx    — welcome screen
-  hooks/
-    useFileSystem.js  — File System Access API wrapper
-    useFavourites.js  — localStorage-backed favourites
-  App.jsx             — main state and navigation
-  main.jsx            — entry point
-  index.css           — CSS variables and base styles
-```
-
-## Roadmap / stretch goals
-
-- [ ] Search across all images by filename
-- [ ] Sort by date, name, file size
-- [ ] Custom folder thumbnails (right-click → set as thumbnail)
-- [ ] Drag images out to desktop or PureRef
-- [ ] Full-screen image preview with keyboard navigation
-- [ ] Tagging and mood labels
-- [ ] Browser extension for capturing images from the web
 
 
 okay this bit here was written by Riku
@@ -84,3 +58,26 @@ Pinch and a punch!, today I decided that if I am going to package this into an i
 
 June 2nd
 okay I ran into that claude problem again. Annoying little bug I think whats going on is that claude is using more tokens than I have allowance for just to read what has already been said previously in the chat, because it tells me I am out of tokens for the day and then when seeing how many tokens I have spent it says only about 20 percent. Annoying! anyways I decided Ill get claude to regularly update the Claude.md folder just to keep getting it back up to date as to what it is meant to do. Today I finished adding the selection and moving folders feature in the file manager part of the app. Also I tweaked some settings added a help screen fixed some of the buggy settings and wrestled with all of the bugs that I kept coming across. Some of which was so tough to overcome but we managed to lock in. most of the other things were polishing small details and adding customization options now that the app functions the way it is meant to for the most part. 
+
+June 3rd
+Every day has been the day that I said that I would complete this app but actually today is the actual day. I did some more polishing until I ran out of credits again. But I think I finally managed to get the app working without hickups as best as I can. I think I have strained my neck a bit by having VS code on the side of my ultrawide though. While I wait for the tokens to come back I will take the opportunity to rant a bit more about AI while I still have the chance to. 
+
+AI RANT PART 2
+I wrote a bit of a rant in my last projects README about how I feel about AI image and video and audio generation and its affect on the creative practice and process of artists which I then posted on my instagram which got positive reception from the people in my circles who are in creative fields. I think the general selling point of AI as a tool is to be an assistant to make jobs easier, but that goes against creative practice because precisely because it is hard is what makes it worth doing. There has been however a lot of contention about the element of vibe coding.
+During the process of this course I had pretty positive opinion on coding with the assistance of an LLM because it makes programming more accessible, however developers around the world that I have heard the opinions of either online or in real life have generally negative opinions about it. I always thought of it as a more accessible way of approaching programming languages and creating projects that they otherwise wouldnt be able to do. Honestly I just thought of their negativity about it being chalked up to just being afraid of losing their job and also kinda bummed that the craft that they spent all of this time learning is now possible for people with less skill than them to do. Which is fair and generally the notion to how people approach conversation about AI replacing them in any field. 
+The caveot to this in my mind is that the accessibility of programming using LLMs will allow more people to create tools and products that suit them specifically rather than relying on a company's product to fulfil that role. However my mind changed about that when my boss at the Japanese restaurant I waiter at (tatsushi) vibecoded a webapp to use as the ordering system to replace our busted up and janky ordering system that we had been using up until that point that I had gotten used to over the course of 4 years. Super cool use of decentralizing software and making a product specifically for your usecase - is what I would say if the software wasnt dog ass. 
+AI slop is a new term that professionals in any given industry call when someone who clearly doesnt have the eye for the specific thing they are trained in uses AI to try mitigate and larp as one of their peers. I see it all the time in twitter spheres where people post AI generated art and pretend they drew it for some kind of clout. That app that tatsushi made, was the sloppiest slop i have ever touched god damn. Which is so confusing because he made it the same way I made my app. I was like theres no way that it could be that bad because its so easy. But if you are working a busy saturday night with a full house and a stupid vibe coded bug happens you would be as pissed as I was. 
+Seemingly this comes to a point with AI generated code being merged into open source projects such as Linux or RPCS3 which has seemingly banned AI generated input. This is due to concerns of security and low quality code which is unoptimized. While I understand this, someone using an LLM to assist with programming with the sufficient understanding of the code its producing, along with the design of the usecase can mitigate this while also being highly productive. 
+AI seems to be shaking up the world in a time that global economics in the future is generally feeling grim for most working class people and AI itself plays a significant role in that. AI is taking jobs right now, seemingly saying the word AI alone is enough to boost its stock valuation by a significant margine as evidenced by that one New Zealand Shoe making company. Jobs are particularly hard to land right now for graduates and layoffs are more common for especially tech companies in favor for usecases in AI. Which in itself is mismanaged as people are getting fired for lack of token usage despite the fact that there isnt a credible parallel evedince that suggests that higher token usage means better quality work or productivity. And everyone can feel that the middle class in western countries are being desintegrated as wealthy get more and poor get less. Understandably people are upset and seem to be adverse to the progress made in the realms of AI. A stark difference to the attitude in China where institutional trust is much higher. 
+When I was in year 9 I remember my music teacher (who doubled as the career advisor because small town (she was also the guidance counsellor and also my mums old boss)) told the whole class about how there is a lot of career opportunities in tech and computer science. Which was true at the time, and for people who went straight to uni after finishing high school would have been able to follow a path like that. And I know people who followed that path, some who are working and other who got in a little too late and is now really struggling to find a job and I feel for them. I would have too but I was the type of nerd that couldn't pick up programming as a hobby because I think visually and not with syntax. This is actually the precise reason as to why I dropped game design in my second year in favor for communication design which I ended up not enjoying very much. This course has managed to present programming to me in a way that is approachable and has opened the opportunity for me to implement my creative practice in a way digitally in far more interesting possibilities than what would otherwise be available to me by myself. 
+While I am weary about the future of AI and its affect on the job market, I am also hopeful that individual industries will be able to find use cases to increase productivity and cut out the tediosity of some jobs especially in the development sphere. While I am also weary of investing interest into a tech mega corporation as of right now I am enjoying having this helper assist me with my game development and programming needs. 
+
+Ookay rant over
+
+June 3rd continued
+I got to a point with my program that leaves me happy to export it, so I installed rust to my PC and added tauri to this project. After a bit of trial and error I got a developer window running natively and implementing my features. It needed some converting as the API that was being used previously was different to what is compatible with tauri eventually we got a version looking good. And similar with building the installer it took a few tries but now it looks like it runs perfectly. Honestly I'm surprised how smoothly it went. I did come up with some things that I might want to change but I am not sure if I will implement it. 
+
+Honestly if you told me a couple months ago that I would make an actual windows app that scratches a particular usecase that works pretty well I wouldnt have believed you. The fact that I managed to make this over the course of almost a month is kind of mind blowing. Its funny how its in my 5th year of my 3 year design degree that I finally kind of get how to do this stuff. 
+
+June 5th
+Even though it would probably do very little to change the grade I get in this project, I thought I would do some tweaks and add some tiny quality of life features to the program that I wanted because I know as soon as my claude subscription runs out it will be a very long time before I will make edits to this program. The edits were now you can double click an image in the infinite canvas window and it will zoom to fit the window, the open in file explorer now works, and the maximize button didnt work until just now. 

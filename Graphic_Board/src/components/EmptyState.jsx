@@ -1,10 +1,11 @@
 import React from 'react'
+import logo from '../../images/logo.png'
 
 export default function EmptyState({ onImport }) {
   return (
     <div style={styles.wrap}>
       <div style={styles.inner}>
-        <img src="/images/logo.png" alt="Graphic Board" style={styles.logo} />
+        <img src={logo} alt="Graphic Board" style={styles.logo} />
         <p style={styles.sub}>a reference image manager for digital artists</p>
         <div style={styles.divider} />
         <p style={styles.body}>

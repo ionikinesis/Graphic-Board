@@ -808,7 +808,7 @@ function FolderCard({
       const customHandle = await folderMeta.getCustomThumb(pathKey)
       const src = customHandle || folder.thumbnailHandle
       if (!src) return
-      try { url = await createThumbnail(src, 300) }
+      try { url = await createThumbnail(src, 220, 0.65) }
       catch { url = await getImageUrl(src).catch(() => null) }
       if (!cancelled && url) setThumbUrl(url)
       else if (cancelled && url) URL.revokeObjectURL(url)
@@ -843,7 +843,7 @@ function FolderCard({
               const isVideo = VIDEO_RE.test(name)
               const u = isVideo
                 ? URL.createObjectURL(await h.getFile())
-                : await createThumbnail(h, 120).catch(() => getImageUrl(h))
+                : await createThumbnail(h, 100, 0.6).catch(() => getImageUrl(h))
               urls.push({ url: u, isVideo })
               if (urls.length >= 6) break
             } catch {}

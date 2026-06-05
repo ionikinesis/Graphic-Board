@@ -1,4 +1,5 @@
 import React from 'react'
+import logo from '../../images/logo.png'
 
 export default function SetupScreen({ status, rootName, onChoose, onGrant, onOpenHelp }) {
   const needsPermission = status === 'needs-permission'
@@ -6,7 +7,7 @@ export default function SetupScreen({ status, rootName, onChoose, onGrant, onOpe
   return (
     <div style={s.wrap}>
       <div style={s.inner}>
-        <img src="/images/logo.png" alt="Graphic Board" style={s.logo} />
+        <img src={logo} alt="Graphic Board" style={s.logo} />
 
         {needsPermission ? (
           <>
